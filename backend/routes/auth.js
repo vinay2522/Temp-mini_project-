@@ -35,21 +35,16 @@ const generateOTP = () => {
 const sendOTP = async (mobileNumber, otp) => {
   try {
     if (!twilioClient) {
-      // If Twilio is not configured, just log the OTP
-      console.log('Development Mode - OTP for', mobileNumber, ':', otp);
       return true;
     }
 
-    console.log('Sending OTP to:', mobileNumber);
     const message = await twilioClient.messages.create({
       body: `Your OTP for Seva Drive registration is: ${otp}. Valid for 10 minutes.`,
       from: process.env.TWILIO_PHONE_NUMBER,
       to: mobileNumber
     });
-    console.log('OTP sent successfully:', message.sid);
     return true;
   } catch (error) {
-    console.error('Failed to send OTP:', error);
     return false;
   }
 };
@@ -58,7 +53,6 @@ const sendOTP = async (mobileNumber, otp) => {
 router.post('/register', async (req, res) => {
   try {
     const { mobileNumber, password } = req.body;
-    console.log('Registration request:', { mobileNumber });
     
     if (!mobileNumber || !password) {
       return res.status(400).json({
@@ -108,7 +102,6 @@ router.post('/register', async (req, res) => {
     });
 
     await user.save();
-    console.log('User registered:', formattedNumber);
 
     // Send OTP via SMS or log it
     const otpSent = await sendOTP(formattedNumber, otp);
@@ -119,15 +112,12 @@ router.post('/register', async (req, res) => {
       });
     }
 
-    console.log('OTP sent successfully for user:', formattedNumber);
-
     res.json({
       success: true,
       message: 'Registration successful. Please verify your mobile number with the OTP sent.',
       userId: user._id.toString()
     });
   } catch (error) {
-    console.error('Registration error:', error);
     res.status(500).json({
       success: false,
       message: error.message || 'Registration failed'
@@ -139,8 +129,7 @@ router.post('/register', async (req, res) => {
 router.post('/verify-otp', async (req, res) => {
   try {
     const { userId, otp } = req.body;
-    console.log('Verifying OTP for user:', userId, 'OTP:', otp);
-
+    
     if (!userId || !otp) {
       return res.status(400).json({
         success: false,
@@ -156,8 +145,6 @@ router.post('/verify-otp', async (req, res) => {
         message: 'User not found'
       });
     }
-
-    console.log('Found user:', user.mobileNumber, 'Stored OTP:', user.otp);
 
     // Check if OTP is expired
     if (!user.otpExpiry || new Date() > new Date(user.otpExpiry)) {
@@ -181,8 +168,6 @@ router.post('/verify-otp', async (req, res) => {
     user.otpExpiry = undefined;
     await user.save();
 
-    console.log('User verified successfully:', user.mobileNumber);
-
     // Generate token for auto-login
     const token = jwt.sign(
       { 
@@ -204,7 +189,6 @@ router.post('/verify-otp', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('OTP verification error:', error);
     res.status(500).json({
       success: false,
       message: error.message || 'OTP verification failed'
@@ -226,11 +210,9 @@ router.post('/login', async (req, res) => {
 
     // Format mobile number
     const formattedNumber = formatMobileNumber(mobileNumber);
-    console.log('Attempting login for:', formattedNumber);
 
     // Find user with password field
     const user = await User.findOne({ mobileNumber: formattedNumber }).select('+password');
-    console.log('User search result:', user ? 'Found' : 'Not found');
     
     if (!user) {
       return res.status(401).json({
@@ -241,7 +223,6 @@ router.post('/login', async (req, res) => {
 
     // Check if user is verified
     if (!user.isVerified) {
-      console.log('User not verified:', formattedNumber);
       return res.status(401).json({
         success: false,
         message: 'Please verify your mobile number first'
@@ -249,19 +230,14 @@ router.post('/login', async (req, res) => {
     }
 
     // Compare password
-    console.log('Comparing password for user:', formattedNumber);
     const isMatch = await user.comparePassword(password);
-    console.log('Password match result:', isMatch);
 
     if (!isMatch) {
-      console.log('Invalid password for user:', formattedNumber);
       return res.status(401).json({
         success: false,
         message: 'Invalid mobile number or password'
       });
     }
-
-    console.log('Login successful for user:', formattedNumber);
 
     // Generate token
     const token = jwt.sign(
@@ -285,7 +261,6 @@ router.post('/login', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Login error:', error);
     res.status(500).json({
       success: false,
       message: error.message || 'Login failed'
@@ -338,7 +313,6 @@ router.post('/update-profile', authenticateToken, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Profile update error:', error);
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to update profile'
@@ -379,7 +353,6 @@ router.get('/profile', authenticateToken, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Profile fetch error:', error);
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to fetch profile'
@@ -432,7 +405,6 @@ router.post('/upload-avatar', authenticateToken, multerUpload.single('avatar'), 
       }
     });
   } catch (error) {
-    console.error('Avatar upload error:', error);
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to upload profile picture'
@@ -473,15 +445,12 @@ router.post('/forgot-password', async (req, res) => {
       });
     }
 
-    console.log('Reset OTP sent successfully for user:', user._id, 'OTP:', otp);
-
     res.json({
       success: true,
       message: 'OTP sent successfully',
       userId: user._id.toString()
     });
   } catch (error) {
-    console.error('Forgot password error:', error);
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to process request'
@@ -493,7 +462,6 @@ router.post('/forgot-password', async (req, res) => {
 router.post('/verify-reset-otp', async (req, res) => {
   try {
     const { userId, otp, newPassword } = req.body;
-    console.log('Verifying reset OTP for user:', userId);
 
     if (!userId || !otp || !newPassword) {
       return res.status(400).json({
@@ -511,11 +479,8 @@ router.post('/verify-reset-otp', async (req, res) => {
       });
     }
 
-    console.log('Found user:', user.mobileNumber, 'with OTP:', user.otp);
-
     // Verify OTP
     if (!user.otp || user.otp !== otp) {
-      console.log('Invalid reset OTP for user:', userId);
       return res.status(400).json({
         success: false,
         message: 'Invalid OTP'
@@ -524,7 +489,6 @@ router.post('/verify-reset-otp', async (req, res) => {
 
     // Check OTP expiry
     if (user.otpExpiry && user.otpExpiry < new Date()) {
-      console.log('OTP expired for user:', userId);
       return res.status(400).json({
         success: false,
         message: 'OTP has expired. Please request a new one.'
@@ -532,7 +496,6 @@ router.post('/verify-reset-otp', async (req, res) => {
     }
 
     // Update user password directly
-    console.log('Updating password for user:', userId);
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(newPassword, salt);
     
@@ -542,14 +505,11 @@ router.post('/verify-reset-otp', async (req, res) => {
     user.otpExpiry = undefined;
     await user.save();
 
-    console.log('Password reset successful for user:', userId);
-
     res.json({
       success: true,
       message: 'Password reset successful. Please login with your new password.'
     });
   } catch (error) {
-    console.error('Password reset error:', error);
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to reset password'
@@ -561,7 +521,6 @@ router.post('/verify-reset-otp', async (req, res) => {
 router.post('/resend-otp', async (req, res) => {
   try {
     const { userId } = req.body;
-    console.log('Resending OTP for user:', userId);
 
     if (!userId) {
       return res.status(400).json({
@@ -596,14 +555,11 @@ router.post('/resend-otp', async (req, res) => {
       });
     }
 
-    console.log('OTP resent successfully for user:', user.mobileNumber);
-
     res.json({
       success: true,
       message: 'OTP sent successfully'
     });
   } catch (error) {
-    console.error('Resend OTP error:', error);
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to resend OTP'
