@@ -8,22 +8,21 @@ const multerUpload = require('../middleware/upload');
 const path = require('path');
 const fs = require('fs');
 
-// Initialize Twilio client if credentials are available
-let twilioClient = null;
-if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
-  const twilio = require('twilio');
-  twilioClient = twilio(
-    process.env.TWILIO_ACCOUNT_SID,
-    process.env.TWILIO_AUTH_TOKEN
-  );
-}
+// Initialize Twilio client
+const twilio = require('twilio');
+const twilioClient = twilio(
+  process.env.TWILIO_ACCOUNT_SID,
+  process.env.TWILIO_AUTH_TOKEN
+);
 
 // Format mobile number consistently with +91 prefix
 const formatMobileNumber = (number) => {
-  // Remove all non-digits and get last 10 digits
-  const cleanNumber = number.toString().replace(/\D/g, '').slice(-10);
+  // Remove all non-digits
+  const cleanNumber = number.toString().replace(/\D/g, '');
+  // Get last 10 digits if number is longer
+  const lastTenDigits = cleanNumber.slice(-10);
   // Add +91 prefix if not present
-  return cleanNumber.startsWith('+91') ? cleanNumber : `+91${cleanNumber}`;
+  return `+91${lastTenDigits}`;
 };
 
 // Generate OTP
@@ -31,21 +30,26 @@ const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
-// Send OTP via Twilio or console.log for development
+// Send OTP via Twilio
 const sendOTP = async (mobileNumber, otp) => {
   try {
-    if (!twilioClient) {
-      return true;
-    }
-
+    console.log(`Sending OTP to ${mobileNumber}`);
+    
     const message = await twilioClient.messages.create({
-      body: `Your OTP for Seva Drive registration is: ${otp}. Valid for 10 minutes.`,
+      body: `Your OTP for Seva Drive password reset is: ${otp}. Valid for 10 minutes.`,
       from: process.env.TWILIO_PHONE_NUMBER,
       to: mobileNumber
     });
+
+    console.log(`SMS sent successfully. SID: ${message.sid}`);
     return true;
   } catch (error) {
-    return false;
+    console.error('Twilio Error:', {
+      message: error.message,
+      code: error.code,
+      status: error.status
+    });
+    throw error;
   }
 };
 
@@ -103,14 +107,8 @@ router.post('/register', async (req, res) => {
 
     await user.save();
 
-    // Send OTP via SMS or log it
-    const otpSent = await sendOTP(formattedNumber, otp);
-    if (!otpSent) {
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to send OTP. Please try again.'
-      });
-    }
+    // Send OTP
+    await sendOTP(formattedNumber, otp);
 
     res.json({
       success: true,
@@ -200,20 +198,16 @@ router.post('/verify-otp', async (req, res) => {
 router.post('/login', async (req, res) => {
   try {
     const { mobileNumber, password } = req.body;
-    
-    if (!mobileNumber || !password) {
-      return res.status(400).json({
-        success: false,
-        message: 'Mobile number and password are required'
-      });
-    }
+    console.log('Login attempt for:', mobileNumber);
 
-    // Format mobile number
+    // Format mobile number consistently
     const formattedNumber = formatMobileNumber(mobileNumber);
+    console.log('Formatted mobile number:', formattedNumber);
 
     // Find user with password field
     const user = await User.findOne({ mobileNumber: formattedNumber }).select('+password');
-    
+    console.log('User found:', user ? 'Yes' : 'No');
+
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -221,16 +215,9 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    // Check if user is verified
-    if (!user.isVerified) {
-      return res.status(401).json({
-        success: false,
-        message: 'Please verify your mobile number first'
-      });
-    }
-
-    // Compare password
-    const isMatch = await user.comparePassword(password);
+    // Verify password directly with bcrypt
+    const isMatch = await bcrypt.compare(password, user.password);
+    console.log('Password match:', isMatch);
 
     if (!isMatch) {
       return res.status(401).json({
@@ -241,29 +228,30 @@ router.post('/login', async (req, res) => {
 
     // Generate token
     const token = jwt.sign(
-      { 
-        userId: user._id,
-        mobileNumber: user.mobileNumber
-      },
+      { userId: user._id },
       process.env.JWT_SECRET,
       { expiresIn: '24h' }
     );
 
-    // Send response
+    // Remove sensitive data
+    const userResponse = user.toObject();
+    delete userResponse.password;
+    delete userResponse.otp;
+    delete userResponse.otpExpiry;
+
+    console.log('Login successful for user:', formattedNumber);
+
     res.json({
       success: true,
+      message: 'Login successful',
       token,
-      user: {
-        userId: user._id.toString(),
-        name: user.name,
-        mobileNumber: user.mobileNumber.replace(/^\+91/, ''),
-        isVerified: user.isVerified
-      }
+      user: userResponse
     });
   } catch (error) {
+    console.error('Login error:', error);
     res.status(500).json({
       success: false,
-      message: error.message || 'Login failed'
+      message: 'Login failed. Please try again.'
     });
   }
 });
@@ -416,8 +404,17 @@ router.post('/upload-avatar', authenticateToken, multerUpload.single('avatar'), 
 router.post('/forgot-password', async (req, res) => {
   try {
     const { mobileNumber } = req.body;
-    const formattedMobile = mobileNumber.toString().replace(/^(\+91|91)/, '').replace(/\D/g, '');
-    const fullMobileNumber = `+91${formattedMobile}`;
+    
+    if (!mobileNumber) {
+      return res.status(400).json({
+        success: false,
+        message: 'Mobile number is required'
+      });
+    }
+
+    // Format mobile number
+    const fullMobileNumber = formatMobileNumber(mobileNumber);
+    console.log('Processing request for:', fullMobileNumber);
 
     // Find user
     const user = await User.findOne({ mobileNumber: fullMobileNumber });
@@ -437,38 +434,27 @@ router.post('/forgot-password', async (req, res) => {
     await user.save();
 
     // Send OTP
-    const otpSent = await sendOTP(fullMobileNumber, otp);
-    if (!otpSent) {
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to send OTP. Please try again.'
-      });
-    }
+    await sendOTP(fullMobileNumber, otp);
 
     res.json({
       success: true,
-      message: 'OTP sent successfully',
+      message: 'OTP sent successfully to your mobile number',
       userId: user._id.toString()
     });
   } catch (error) {
+    console.error('Forgot password error:', error);
     res.status(500).json({
       success: false,
-      message: error.message || 'Failed to process request'
+      message: 'Failed to process request. Please try again.'
     });
   }
 });
 
-// Verify reset OTP and update password
-router.post('/verify-reset-otp', async (req, res) => {
+// Reset password with OTP verification
+router.post('/reset-password', async (req, res) => {
   try {
     const { userId, otp, newPassword } = req.body;
-
-    if (!userId || !otp || !newPassword) {
-      return res.status(400).json({
-        success: false,
-        message: 'User ID, OTP, and new password are required'
-      });
-    }
+    console.log('Reset password request:', { userId, otp });
 
     // Find user with OTP fields
     const user = await User.findById(userId).select('+otp +otpExpiry +password');
@@ -480,6 +466,7 @@ router.post('/verify-reset-otp', async (req, res) => {
     }
 
     // Verify OTP
+    console.log('Stored OTP:', user.otp, 'Received OTP:', otp);
     if (!user.otp || user.otp !== otp) {
       return res.status(400).json({
         success: false,
@@ -488,31 +475,38 @@ router.post('/verify-reset-otp', async (req, res) => {
     }
 
     // Check OTP expiry
-    if (user.otpExpiry && user.otpExpiry < new Date()) {
+    if (!user.otpExpiry || Date.now() > user.otpExpiry) {
       return res.status(400).json({
         success: false,
-        message: 'OTP has expired. Please request a new one.'
+        message: 'OTP has expired'
       });
     }
 
-    // Update user password directly
+    // Hash new password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(newPassword, salt);
-    
-    // Update user password and clear OTP
-    user.password = hashedPassword;
-    user.otp = undefined;
-    user.otpExpiry = undefined;
-    await user.save();
+    console.log('Updating password for user:', user.mobileNumber);
+
+    // Update password directly
+    await User.findByIdAndUpdate(userId, {
+      $set: { 
+        password: hashedPassword,
+        otp: null,
+        otpExpiry: null
+      }
+    });
+
+    console.log('Password updated successfully');
 
     res.json({
       success: true,
-      message: 'Password reset successful. Please login with your new password.'
+      message: 'Password reset successful'
     });
   } catch (error) {
+    console.error('Reset password error:', error);
     res.status(500).json({
       success: false,
-      message: error.message || 'Failed to reset password'
+      message: 'Failed to reset password'
     });
   }
 });
@@ -546,14 +540,8 @@ router.post('/resend-otp', async (req, res) => {
     user.otpExpiry = otpExpiry;
     await user.save();
 
-    // Send OTP via SMS
-    const otpSent = await sendOTP(user.mobileNumber, otp);
-    if (!otpSent) {
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to send OTP. Please try again.'
-      });
-    }
+    // Send OTP
+    await sendOTP(user.mobileNumber, otp);
 
     res.json({
       success: true,

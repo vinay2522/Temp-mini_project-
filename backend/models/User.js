@@ -55,22 +55,13 @@ const userSchema = new mongoose.Schema({
 // Method to compare password
 userSchema.methods.comparePassword = async function(candidatePassword) {
   try {
-    console.log('Comparing password...');
-    console.log('Candidate password:', candidatePassword);
-    console.log('Stored password exists:', !!this.password);
-    
     if (!this.password || !candidatePassword) {
-      console.log('Missing password data');
       return false;
     }
 
-    // Use bcrypt.compare for secure comparison
-    const isMatch = await bcrypt.compare(candidatePassword, this.password);
-    console.log('Password comparison result:', isMatch);
-    return isMatch;
+    return await bcrypt.compare(candidatePassword, this.password);
   } catch (error) {
-    console.error('Password comparison error:', error);
-    return false;
+    throw new Error('Error comparing passwords');
   }
 };
 
@@ -79,19 +70,14 @@ userSchema.pre('save', async function(next) {
   try {
     // Only hash the password if it has been modified or is new
     if (!this.isModified('password')) {
-      console.log('Password not modified, skipping hash');
       return next();
     }
 
-    console.log('Hashing new password...');
     const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(this.password, salt);
-    this.password = hashedPassword;
-    console.log('Password hashed successfully');
+    this.password = await bcrypt.hash(this.password, salt);
     next();
   } catch (error) {
-    console.error('Password hashing error:', error);
-    next(error);
+    next(new Error('Error hashing password'));
   }
 });
 
