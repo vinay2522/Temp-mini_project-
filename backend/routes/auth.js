@@ -31,12 +31,17 @@ const generateOTP = () => {
 };
 
 // Send OTP via Twilio
-const sendOTP = async (mobileNumber, otp) => {
+const sendOTP = async (mobileNumber, otp, purpose = 'verification') => {
   try {
     console.log(`Sending OTP to ${mobileNumber}`);
     
+    // Different messages for different purposes
+    const messageText = purpose === 'verification' 
+      ? `Your mobile verification OTP for Seva Drive is: ${otp}. Valid for 10 minutes.`
+      : `Your OTP for Seva Drive password reset is: ${otp}. Valid for 10 minutes.`;
+
     const message = await twilioClient.messages.create({
-      body: `Your OTP for Seva Drive password reset is: ${otp}. Valid for 10 minutes.`,
+      body: messageText,
       from: process.env.TWILIO_PHONE_NUMBER,
       to: mobileNumber
     });
@@ -107,8 +112,15 @@ router.post('/register', async (req, res) => {
 
     await user.save();
 
-    // Send OTP
-    await sendOTP(formattedNumber, otp);
+    // Send OTP with verification purpose
+    const sent = await sendOTP(formattedNumber, otp, 'verification');
+
+    if (!sent) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to send OTP'
+      });
+    }
 
     res.json({
       success: true,
@@ -400,52 +412,92 @@ router.post('/upload-avatar', authenticateToken, multerUpload.single('avatar'), 
   }
 });
 
+// Send OTP for registration
+router.post('/send-otp', async (req, res) => {
+  try {
+    const { mobileNumber } = req.body;
+    console.log('Processing request for:', mobileNumber);
+
+    const formattedNumber = formatMobileNumber(mobileNumber);
+    console.log('Sending OTP to', formattedNumber);
+
+    // Generate OTP
+    const otp = generateOTP();
+    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    // Find and update user with new OTP
+    const user = await User.findOneAndUpdate(
+      { mobileNumber: formattedNumber },
+      { 
+        otp,
+        otpExpiry
+      },
+      { new: true }
+    );
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Send OTP
+    await sendOTP(formattedNumber, otp, 'verification');
+
+    res.json({
+      success: true,
+      message: 'OTP sent successfully'
+    });
+  } catch (error) {
+    console.error('Send OTP error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to send OTP'
+    });
+  }
+});
+
 // Forgot password - send OTP
 router.post('/forgot-password', async (req, res) => {
   try {
     const { mobileNumber } = req.body;
-    
-    if (!mobileNumber) {
-      return res.status(400).json({
-        success: false,
-        message: 'Mobile number is required'
-      });
-    }
+    console.log('Processing request for:', mobileNumber);
 
-    // Format mobile number
-    const fullMobileNumber = formatMobileNumber(mobileNumber);
-    console.log('Processing request for:', fullMobileNumber);
+    const formattedNumber = formatMobileNumber(mobileNumber);
+    console.log('Sending OTP to', formattedNumber);
 
     // Find user
-    const user = await User.findOne({ mobileNumber: fullMobileNumber });
+    const user = await User.findOne({ mobileNumber: formattedNumber });
     if (!user) {
       return res.status(404).json({
         success: false,
-        message: 'User not found with this mobile number'
+        message: 'User not found'
       });
     }
 
-    // Generate and store OTP
+    // Generate OTP
     const otp = generateOTP();
-    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes validity
+    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
+    // Save OTP to user
     user.otp = otp;
     user.otpExpiry = otpExpiry;
     await user.save();
 
     // Send OTP
-    await sendOTP(fullMobileNumber, otp);
+    await sendOTP(formattedNumber, otp, 'reset');
 
     res.json({
       success: true,
-      message: 'OTP sent successfully to your mobile number',
-      userId: user._id.toString()
+      message: 'OTP sent successfully',
+      userId: user._id
     });
   } catch (error) {
     console.error('Forgot password error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to process request. Please try again.'
+      message: 'Failed to process request'
     });
   }
 });
@@ -540,8 +592,15 @@ router.post('/resend-otp', async (req, res) => {
     user.otpExpiry = otpExpiry;
     await user.save();
 
-    // Send OTP
-    await sendOTP(user.mobileNumber, otp);
+    // Send OTP with verification purpose
+    const sent = await sendOTP(user.mobileNumber, otp, 'verification');
+
+    if (!sent) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to resend OTP'
+      });
+    }
 
     res.json({
       success: true,
