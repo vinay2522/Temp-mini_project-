@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { GoogleMap, useJsApiLoader, Marker, DirectionsRenderer, InfoWindow } from '@react-google-maps/api'
+import { createEmergencyBooking, getEmergencyBookingStatus } from '../api/api'
 
 const mapContainerStyle = {
   width: '100%',
@@ -43,7 +44,6 @@ export default function BookingForm() {
     { id: 'other', label: 'Other Emergency', icon: '🏥' },
   ];
 
-
   const handleEmergencyTypeSelect = (type) => {
     setBookingData({ ...bookingData, emergencyType: type })
     setStep(2)
@@ -51,73 +51,105 @@ export default function BookingForm() {
 
   const getLocation = () => {
     setLoading(true)
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const { latitude, longitude } = position.coords
-          setBookingData(prev => ({ ...prev, latitude, longitude }))
-          getAddressFromCoordinates(latitude, longitude)
-        },
-        (error) => {
-          setError('Error getting location. Please try again.')
-          setLoading(false)
-        },
-        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
-      )
-    } else {
-      setError('Geolocation is not supported by this browser.')
-      setLoading(false)
-    }
-  }
+    setError('')
 
-  const getAddressFromCoordinates = (lat, lng) => {
-    const geocoder = new window.google.maps.Geocoder()
-    geocoder.geocode({ location: { lat, lng } }, (results, status) => {
-      if (status === 'OK') {
-        if (results[0]) {
-          setBookingData(prev => ({ ...prev, address: results[0].formatted_address }))
-          handleBooking(lat, lng, results[0].formatted_address)
-        } else {
-          setError('No address found for this location.')
-          setLoading(false)
-        }
-      } else {
-        setError('Geocoder failed due to: ' + status)
+    if (!navigator.geolocation) {
+      setError('Geolocation is not supported by your browser')
+      setLoading(false)
+      return
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const lat = position.coords.latitude
+        const lng = position.coords.longitude
+        
+        setBookingData(prev => ({
+          ...prev,
+          latitude: lat,
+          longitude: lng
+        }))
+
+        // Get address from coordinates
+        const geocoder = new window.google.maps.Geocoder()
+        geocoder.geocode({ location: { lat, lng } }, async (results, status) => {
+          if (status === 'OK') {
+            if (results[0]) {
+              setBookingData(prev => ({ ...prev, address: results[0].formatted_address }))
+              // Call handleBooking here after setting the address
+              await handleBooking(lat, lng, results[0].formatted_address)
+            } else {
+              setError('No address found for this location.')
+              setLoading(false)
+            }
+          } else {
+            setError('Failed to get address from location.')
+            setLoading(false)
+          }
+        })
+      },
+      (error) => {
+        setError('Failed to get your location. Please try again.')
         setLoading(false)
       }
-    })
+    )
   }
 
   const handleBooking = async (lat, lon, address) => {
     try {
-      const bookingPayload = {
-        ...bookingData,
-        latitude: lat,
-        longitude: lon,
-        address: address
-      }
+        const bookingPayload = {
+            emergencyType: bookingData.emergencyType,
+            latitude: lat,
+            longitude: lon,
+            address: address
+        }
 
-      // In a real application, you would make an API call here
-      // For demonstration, we'll simulate a successful booking
-      await new Promise(resolve => setTimeout(resolve, 1000))
+        // Create emergency booking in database
+        const response = await createEmergencyBooking(bookingPayload)
+        
+        if (response.success) {
+            setSuccess(true)
+            setLoading(false)
+            setStep(3)
+            setBookingId(response.bookingId)
 
-      const data = { bookingId: 'BOOKING-' + Math.floor(1000 + Math.random() * 9000) }
-      setSuccess(true)
-      setLoading(false)
-      setStep(3)
-      setBookingId(data.bookingId)
+            // Set simulated ambulance details (you can replace this with real data later)
+            setAmbulanceDetails({
+                vehicleNumber: 'AMB-' + Math.floor(1000 + Math.random() * 9000),
+                driverName: 'John Doe',
+                contactNumber: '+1 (555) 123-4567'
+            })
 
-      setAmbulanceDetails({
-        vehicleNumber: 'AMB-' + Math.floor(1000 + Math.random() * 9000),
-        driverName: 'John Doe',
-        contactNumber: '+1 (555) 123-4567'
-      })
+            // Start tracking the booking status
+            startStatusTracking(response.bookingId)
+        } else {
+            throw new Error('Booking failed')
+        }
     } catch (err) {
-      console.error('Booking Error:', err)
-      setError('Failed to book ambulance. Please try again.')
-      setLoading(false)
+        console.error('Booking Error:', err)
+        setError('Failed to book ambulance. Please try again.')
+        setLoading(false)
     }
   }
+
+  const startStatusTracking = async (id) => {
+    const checkStatus = async () => {
+      try {
+        const response = await getEmergencyBookingStatus(id);
+        if (response.success) {
+          setTracking(response.bookingDetails);
+          if (response.status === 'COMPLETED' || response.status === 'CANCELLED') {
+            clearInterval(statusInterval);
+          }
+        }
+      } catch (error) {
+        console.error('Status tracking error:', error);
+      }
+    };
+
+    const statusInterval = setInterval(checkStatus, 10000); // Check every 10 seconds
+    checkStatus(); // Initial check
+  };
 
   const updateRoute = useCallback((origin, destination) => {
     if (isLoaded && window.google) {
@@ -274,7 +306,7 @@ export default function BookingForm() {
               disabled={loading}
               className="w-full bg-red-600 text-white py-3 rounded-md hover:bg-red-700 disabled:bg-red-300 disabled:cursor-not-allowed transition duration-300"
             >
-              {loading ? 'Processing...' : 'Share Location & Book Now'}
+              {loading ? 'Processing...' : 'Book Now'}
             </button>
             {error && (
               <div className="mt-4 p-3 bg-red-100 text-red-700 rounded-md">
@@ -315,11 +347,11 @@ export default function BookingForm() {
             <p className="mb-1">Distance: {tracking.distance}</p>
             <p className="mb-1">Estimated Arrival Time: {tracking.estimatedTime}</p>
             {ambulanceDetails && (
-              <>
+              <div>
                 <p className="mb-1">Vehicle Number: {ambulanceDetails.vehicleNumber}</p>
                 <p className="mb-1">Driver: {ambulanceDetails.driverName}</p>
                 <p>Contact: {ambulanceDetails.contactNumber}</p>
-              </>
+              </div>
             )}
           </div>
           <GoogleMap
@@ -385,4 +417,3 @@ export default function BookingForm() {
     </div>
   )
 }
-

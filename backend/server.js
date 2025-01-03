@@ -26,16 +26,39 @@ const {
 // Import routes
 const contactRoutes = require('./routes/contact');
 const authRoutes = require('./routes/auth');
+const emergencyBookingRoutes = require('./routes/emergencyBooking');
+const detailedBookingRoutes = require('./routes/detailedBooking');
 
 // Initialize Express app
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware
-app.use(cors());
-app.use(express.json());
+// Security middleware
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  credentials: true
+}));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Debug middleware to log all requests
+// Security headers
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  next();
+});
+
+// Rate limiting
+const rateLimit = require('express-rate-limit');
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100 // limit each IP to 100 requests per windowMs
+});
+app.use('/api/', limiter);
+
+// Middleware
 app.use((req, res, next) => {
   console.log('Incoming request:', req.method, req.path, req.body);
   next();
@@ -44,6 +67,8 @@ app.use((req, res, next) => {
 // Mount routes FIRST - before any other routes
 app.use('/api/auth', authRoutes);
 app.use('/api/contact', contactRoutes);
+app.use('/api/emergency-booking', emergencyBookingRoutes);
+app.use('/api/detailed-booking', detailedBookingRoutes);
 
 // Create uploads directory if it doesn't exist
 const uploadDir = path.join(__dirname, 'uploads');
