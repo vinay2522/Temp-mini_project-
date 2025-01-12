@@ -1,15 +1,43 @@
-"use client"
-
-import { useState, useCallback, useEffect, useRef } from 'react'
-import { GoogleMap, useJsApiLoader, Marker, DirectionsRenderer, InfoWindow } from '@react-google-maps/api'
-import { createEmergencyBooking, getEmergencyBookingStatus } from '../api/api'
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import { 
+  GoogleMap, 
+  useJsApiLoader, 
+  DirectionsRenderer, 
+  MarkerF,
+  OverlayView 
+} from '@react-google-maps/api'
+import { createEmergencyBooking, getEmergencyBookingStatus, getPredictedAmbulance } from '../api/api'
 
 const mapContainerStyle = {
   width: '100%',
-  height: '80vh'
+  height: '60vh',
+  transition: 'all 0.3s ease-in-out'
 }
 
-const libraries = ['places']
+const wideMapStyle = {
+  position: 'fixed',
+  top: 0,
+  left: 0,
+  right: 0,
+  bottom: 0,
+  width: '100vw',
+  height: '100vh',
+  zIndex: 9999,
+  backgroundColor: 'white'
+};
+
+const normalMapStyle = {
+  width: '100%',
+  height: '60vh',
+  position: 'relative'
+};
+
+const libraries = ['places', 'geometry', 'marker']
+
+const defaultCenter = {
+  lat: 12.9716,
+  lng: 77.5946
+}
 
 export default function BookingForm() {
   const [step, setStep] = useState(1)
@@ -18,23 +46,332 @@ export default function BookingForm() {
   const [success, setSuccess] = useState(false)
   const [bookingId, setBookingId] = useState(null)
   const [showMap, setShowMap] = useState(false)
-  const [tracking, setTracking] = useState(null)
+  const [isWideMap, setIsWideMap] = useState(false)
+  const [isTracking, setIsTracking] = useState(false)
+  const [selectedMarker, setSelectedMarker] = useState(null)
   const [directions, setDirections] = useState(null)
   const [ambulanceDetails, setAmbulanceDetails] = useState(null)
-  const [selectedMarker, setSelectedMarker] = useState(null)
-  const mapRef = useRef(null)
-
-  const { isLoaded, loadError } = useJsApiLoader({
-    googleMapsApiKey: 'AIzaSyAL9FKmHqjFf8uH9svsTzD43QwZ00dvqNE',
-    libraries,
-  })
-
+  const [ambulanceLocation, setAmbulanceLocation] = useState(null)
+  const [routeDetails, setRouteDetails] = useState(null)
   const [bookingData, setBookingData] = useState({
     emergencyType: '',
     latitude: null,
     longitude: null,
     address: ''
   })
+  const [userLocation, setUserLocation] = useState(null)
+  const [ambulancePhoneLocation, setAmbulancePhoneLocation] = useState(null)
+  const [liveLocation, setLiveLocation] = useState(null)
+  const [showTrackButton, setShowTrackButton] = useState(true);
+  const [alternativeRoutes, setAlternativeRoutes] = useState([]);
+  const [currentProgress, setCurrentProgress] = useState(0)
+
+  const mapRef = useRef(null)
+  const trackingIntervalRef = useRef(null)
+
+  const { isLoaded, loadError } = useJsApiLoader({
+    googleMapsApiKey: 'AIzaSyAL9FKmHqjFf8uH9svsTzD43QwZ00dvqNE',
+    libraries,
+  })
+
+  const center = useMemo(() => ({
+    lat: bookingData.latitude || defaultCenter.lat,
+    lng: bookingData.longitude || defaultCenter.lng
+  }), [bookingData.latitude, bookingData.longitude])
+
+  const onMapLoad = useCallback((map) => {
+    mapRef.current = map
+    if (bookingData.latitude && bookingData.longitude && ambulanceLocation) {
+      const bounds = new window.google.maps.LatLngBounds()
+      bounds.extend({ lat: parseFloat(bookingData.latitude), lng: parseFloat(bookingData.longitude) })
+      bounds.extend(ambulanceLocation)
+      map.fitBounds(bounds)
+    }
+  }, [bookingData.latitude, bookingData.longitude, ambulanceLocation])
+
+  const interpolatePosition = useCallback((start, end, fraction) => {
+    return {
+      lat: start.lat + (end.lat - start.lat) * fraction,
+      lng: start.lng + (end.lng - start.lng) * fraction
+    };
+  }, []);
+
+  const startLiveTracking = async () => {
+    if (!ambulanceDetails?.contactNumber) {
+      console.error('No ambulance contact number available');
+      return;
+    }
+    
+    setIsTracking(true);
+    
+    // Simulating getting phone location - Replace this with actual phone location API
+    // This is where you would integrate with your phone location tracking service
+    const trackPhoneLocation = async () => {
+      try {
+        // Replace this with actual API call to get phone location
+        const response = await fetch(`/api/track-phone/${ambulanceDetails.contactNumber}`);
+        const location = await response.json();
+        
+        if (location && location.lat && location.lng) {
+          setAmbulancePhoneLocation(location);
+          setLiveLocation(location);
+          
+          if (userLocation) {
+            calculateRouteDistance();
+          }
+        }
+      } catch (error) {
+        console.error('Error tracking phone location:', error);
+        setIsTracking(false);
+      }
+    };
+    
+    // Only track if we're still in tracking mode
+    if (isTracking) {
+      const intervalId = setInterval(trackPhoneLocation, 5000); // Update every 5 seconds
+      return () => {
+        clearInterval(intervalId);
+        setIsTracking(false);
+      };
+    }
+  };
+
+  const calculateRouteDistance = useCallback(() => {
+    if (!bookingData.latitude || !bookingData.longitude || !ambulanceLocation) return;
+
+    const directionsService = new window.google.maps.DirectionsService();
+    
+    directionsService.route(
+      {
+        origin: { lat: parseFloat(bookingData.latitude), lng: parseFloat(bookingData.longitude) },
+        destination: ambulanceLocation,
+        travelMode: window.google.maps.TravelMode.DRIVING,
+        optimizeWaypoints: true,
+        drivingOptions: {
+          departureTime: new Date(),
+          trafficModel: window.google.maps.TrafficModel.BEST_GUESS
+        }
+      },
+      (result, status) => {
+        if (status === window.google.maps.DirectionsStatus.OK) {
+          setDirections(result);
+          const route = result.routes[0];
+          if (route && route.legs[0]) {
+            setRouteDetails({
+              distance: route.legs[0].distance.text,
+              duration_in_traffic: route.legs[0].duration_in_traffic.text,
+              traffic_percentage: Math.round((route.legs[0].duration_in_traffic.value / route.legs[0].duration.value - 1) * 100)
+            });
+          }
+        } else {
+          console.error('Error calculating route:', status);
+        }
+      }
+    );
+  }, [bookingData.latitude, bookingData.longitude, ambulanceLocation]);
+
+  useEffect(() => {
+    if (isLoaded && bookingData.latitude && bookingData.longitude && ambulanceLocation) {
+      calculateRouteDistance();
+    }
+  }, [isLoaded, bookingData.latitude, bookingData.longitude, ambulanceLocation, calculateRouteDistance]);
+
+  const handleTrackAmbulance = () => {
+    setShowMap(true);
+    setShowTrackButton(false);
+    // Calculate route immediately when showing map
+    if (userLocation && ambulanceLocation) {
+      calculateRouteDistance();
+    }
+  };
+
+  const handleCloseMap = () => {
+    setShowMap(false);
+    setShowTrackButton(true);
+    setIsWideMap(false);
+  };
+
+  const calculateRoute = (origin, destination) => {
+    const directionsService = new window.google.maps.DirectionsService();
+    
+    directionsService.route(
+      {
+        origin: origin,
+        destination: destination,
+        travelMode: window.google.maps.TravelMode.DRIVING,
+        drivingOptions: {
+          departureTime: new Date(),
+          trafficModel: 'bestguess'
+        },
+        optimizeWaypoints: true
+      },
+      (result, status) => {
+        if (status === window.google.maps.DirectionsStatus.OK) {
+          setDirections(result);
+        } else {
+          console.error('Directions request failed:', status);
+        }
+      }
+    );
+  };
+
+  useEffect(() => {
+    if (ambulanceDetails && ambulanceDetails.ambulance_coordinates) {
+      const coords = ambulanceDetails.ambulance_coordinates
+        .replace('(', '')
+        .replace(')', '')
+        .split(',')
+        .map(coord => parseFloat(coord.trim()));
+      
+      setAmbulanceLocation({ lat: coords[0], lng: coords[1] });
+    }
+  }, [ambulanceDetails]);
+
+  const mapOptions = {
+    disableDefaultUI: true,
+    zoomControl: true,
+    fullscreenControl: true,
+    styles: [{ featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] }],
+  };
+
+  const renderMap = () => {
+    if (!isLoaded) return 'Loading maps...';
+    if (loadError) return 'Error loading maps';
+
+    return (
+      <div style={isWideMap ? wideMapStyle : normalMapStyle}>
+        <div className="absolute top-4 right-4 z-[10000] flex gap-2">
+          <button
+            onClick={() => setIsWideMap(!isWideMap)}
+            className="px-4 py-2 bg-white rounded-md shadow-lg hover:bg-gray-100 transition-colors"
+          >
+            {isWideMap ? 'Shrink Map' : 'Expand Map'}
+          </button>
+          <button
+            onClick={handleCloseMap}
+            className="px-4 py-2 bg-white rounded-md shadow-lg hover:bg-gray-100 transition-colors"
+          >
+            Close Map
+          </button>
+        </div>
+        
+        <GoogleMap
+          mapContainerStyle={mapContainerStyle}
+          center={userLocation || defaultCenter}
+          zoom={14}
+          options={mapOptions}
+          onLoad={onMapLoad}
+        >
+          {/* Route Display */}
+          {directions && (
+            <DirectionsRenderer
+              directions={directions}
+              options={{
+                suppressMarkers: true,
+                polylineOptions: {
+                  strokeColor: '#2563eb',
+                  strokeWeight: 4,
+                  zIndex: 1
+                }
+              }}
+            />
+          )}
+
+          {/* User Location Marker */}
+          {bookingData.latitude && bookingData.longitude && (
+            <MarkerF
+              position={{
+                lat: parseFloat(bookingData.latitude),
+                lng: parseFloat(bookingData.longitude)
+              }}
+              icon={{
+                url: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png',
+                scaledSize: isLoaded ? new window.google.maps.Size(40, 40) : null
+              }}
+              onClick={() => setSelectedMarker('user')}
+              zIndex={3}
+            />
+          )}
+
+          {/* Ambulance Location Marker */}
+          {ambulanceLocation && (
+            <MarkerF
+              position={ambulanceLocation}
+              icon={{
+                url: 'http://maps.google.com/mapfiles/ms/icons/green-dot.png',
+                scaledSize: isLoaded ? new window.google.maps.Size(40, 40) : null
+              }}
+              onClick={() => setSelectedMarker('ambulance')}
+              zIndex={3}
+            />
+          )}
+
+          {/* Custom Info Overlay */}
+          {selectedMarker && (
+            <OverlayView
+              position={
+                selectedMarker === 'user'
+                  ? {
+                      lat: parseFloat(bookingData.latitude),
+                      lng: parseFloat(bookingData.longitude)
+                    }
+                  : ambulanceLocation
+              }
+              mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
+              getPixelPositionOffset={(width, height) => ({
+                x: -(width / 2),
+                y: -height - 10
+              })}
+            >
+              <div
+                style={{
+                  background: 'white',
+                  padding: '12px',
+                  borderRadius: '8px',
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
+                  minWidth: '200px',
+                  position: 'relative'
+                }}
+              >
+                <button
+                  onClick={() => setSelectedMarker(null)}
+                  style={{
+                    position: 'absolute',
+                    right: '8px',
+                    top: '8px',
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '16px',
+                    cursor: 'pointer',
+                    color: '#666'
+                  }}
+                >
+                  ×
+                </button>
+                <div style={{
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  marginBottom: '8px',
+                  paddingRight: '20px'
+                }}>
+                  {selectedMarker === 'user' ? 'Your Location' : 'Ambulance Location'}
+                </div>
+                <div style={{
+                  fontSize: '13px',
+                  color: '#666'
+                }}>
+                  {selectedMarker === 'user' 
+                    ? bookingData.address 
+                    : ambulanceDetails?.ambulance_address
+                  }
+                </div>
+              </div>
+            </OverlayView>
+          )}
+        </GoogleMap>
+      </div>
+    );
+  };
 
   const emergencyTypes = [
     { id: 'cardiac', label: 'Cardiac Arrest', icon: '🫀' },
@@ -42,7 +379,7 @@ export default function BookingForm() {
     { id: 'accident', label: 'Accident', icon: '🚗' },
     { id: 'breathing', label: 'Breathing Problem', icon: '🫁' },
     { id: 'other', label: 'Other Emergency', icon: '🏥' },
-  ];
+  ]
 
   const handleEmergencyTypeSelect = (type) => {
     setBookingData({ ...bookingData, emergencyType: type })
@@ -70,13 +407,13 @@ export default function BookingForm() {
           longitude: lng
         }))
 
-        // Get address from coordinates
+        setUserLocation({ lat, lng })
+
         const geocoder = new window.google.maps.Geocoder()
         geocoder.geocode({ location: { lat, lng } }, async (results, status) => {
           if (status === 'OK') {
             if (results[0]) {
               setBookingData(prev => ({ ...prev, address: results[0].formatted_address }))
-              // Call handleBooking here after setting the address
               await handleBooking(lat, lng, results[0].formatted_address)
             } else {
               setError('No address found for this location.')
@@ -97,323 +434,184 @@ export default function BookingForm() {
 
   const handleBooking = async (lat, lon, address) => {
     try {
-        const bookingPayload = {
-            emergencyType: bookingData.emergencyType,
-            latitude: lat,
-            longitude: lon,
-            address: address
-        }
-
-        // Create emergency booking in database
-        const response = await createEmergencyBooking(bookingPayload)
-        
-        if (response.success) {
-            setSuccess(true)
-            setLoading(false)
-            setStep(3)
-            setBookingId(response.bookingId)
-
-            // Set simulated ambulance details (you can replace this with real data later)
-            setAmbulanceDetails({
-                vehicleNumber: 'AMB-' + Math.floor(1000 + Math.random() * 9000),
-                driverName: 'John Doe',
-                contactNumber: '+1 (555) 123-4567'
-            })
-
-            // Start tracking the booking status
-            startStatusTracking(response.bookingId)
-        } else {
-            throw new Error('Booking failed')
-        }
-    } catch (err) {
-        console.error('Booking Error:', err)
-        setError('Failed to book ambulance. Please try again.')
-        setLoading(false)
-    }
-  }
-
-  const startStatusTracking = async (id) => {
-    const checkStatus = async () => {
-      try {
-        const response = await getEmergencyBookingStatus(id);
-        if (response.success) {
-          setTracking(response.bookingDetails);
-          if (response.status === 'COMPLETED' || response.status === 'CANCELLED') {
-            clearInterval(statusInterval);
-          }
-        }
-      } catch (error) {
-        console.error('Status tracking error:', error);
+      const bookingPayload = {
+        emergencyType: bookingData.emergencyType,
+        latitude: lat,
+        longitude: lon,
+        address: address
       }
-    };
 
-    const statusInterval = setInterval(checkStatus, 10000); // Check every 10 seconds
-    checkStatus(); // Initial check
+      const predictionResponse = await getPredictedAmbulance({
+        latitude: lat,
+        longitude: lon
+      });
+
+      if (!predictionResponse || !predictionResponse.ambulance_number) {
+        throw new Error('Failed to get ambulance prediction');
+      }
+
+      // Parse ambulance coordinates
+      const coordsMatch = predictionResponse.ambulance_coordinates.match(/\(([-\d.]+),\s*([-\d.]+)\)/);
+      if (coordsMatch) {
+        const [_, ambLat, ambLng] = coordsMatch;
+        const ambLocation = {
+          lat: parseFloat(ambLat),
+          lng: parseFloat(ambLng)
+        };
+        setAmbulanceLocation(ambLocation);
+      }
+
+      // Set route details from ML prediction
+      if (predictionResponse.optimal_route) {
+        setRouteDetails({
+          name: predictionResponse.optimal_route.name,
+          distance: predictionResponse.optimal_route.distance,
+          duration_in_traffic: predictionResponse.optimal_route.duration_in_traffic,
+          traffic_percentage: predictionResponse.optimal_route.traffic_percentage,
+          route_description: predictionResponse.optimal_route.route_description
+        });
+        
+        if (predictionResponse.optimal_route.alternative_routes) {
+          setAlternativeRoutes(predictionResponse.optimal_route.alternative_routes);
+        }
+      }
+
+      const response = await createEmergencyBooking({
+        ...bookingPayload,
+        ambulanceNumber: predictionResponse.ambulance_number,
+        ambulanceDetails: {
+          vehicleNumber: predictionResponse.ambulance_number,
+          phoneNumber: predictionResponse.phone_number,
+          address: predictionResponse.ambulance_address,
+          coordinates: predictionResponse.ambulance_coordinates
+        }
+      });
+
+      if (response && response.booking_id) {
+        setSuccess(true);
+        setLoading(false);
+        setStep(3);
+        setBookingId(response.booking_id);
+
+        setAmbulanceDetails({
+          vehicleNumber: predictionResponse.ambulance_number,
+          contactNumber: predictionResponse.phone_number,
+          address: predictionResponse.ambulance_address
+        });
+
+        if (userLocation && ambulanceLocation) {
+          calculateRouteDistance();
+        }
+      } else {
+        throw new Error('Booking failed: Invalid response from server');
+      }
+    } catch (err) {
+      console.error('Booking Error:', err);
+      setError('Failed to book ambulance. Please try again.');
+      setLoading(false);
+    }
   };
 
-  const updateRoute = useCallback((origin, destination) => {
-    if (isLoaded && window.google) {
-      const directionsService = new window.google.maps.DirectionsService()
-      const distanceMatrixService = new window.google.maps.DistanceMatrixService()
-
-      directionsService.route(
-        {
-          origin: origin,
-          destination: destination,
-          travelMode: window.google.maps.TravelMode.DRIVING,
-        },
-        (result, status) => {
-          if (status === window.google.maps.DirectionsStatus.OK) {
-            setDirections(result)
-          } else {
-            console.error(`error fetching directions ${result}`)
-          }
-        }
-      )
-
-      distanceMatrixService.getDistanceMatrix(
-        {
-          origins: [origin],
-          destinations: [destination],
-          travelMode: window.google.maps.TravelMode.DRIVING,
-          unitSystem: window.google.maps.UnitSystem.METRIC,
-        },
-        (response, status) => {
-          if (status === 'OK') {
-            const distance = response.rows[0].elements[0].distance.text
-            const duration = response.rows[0].elements[0].duration.text
-            setTracking(prev => ({
-              ...prev,
-              distance: distance,
-              estimatedTime: duration
-            }))
-          }
-        }
-      )
-    }
-  }, [isLoaded])
-
-  const trackAmbulance = useCallback(async () => {
-    if (!bookingId) {
-      console.error('No booking ID available for tracking')
-      setError('Unable to track ambulance. Please try again.')
-      return
-    }
-
-    try {
-      // Simulating API call for ambulance tracking
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
-      const simulatedAmbulanceLocation = {
-        latitude: bookingData.latitude + (Math.random() - 0.5) * 0.01,
-        longitude: bookingData.longitude + (Math.random() - 0.5) * 0.01
-      }
-
-      setTracking(prev => ({ 
-        ...prev, 
-        ambulanceLocation: simulatedAmbulanceLocation
-      }))
-
-      const origin = { lat: bookingData.latitude, lng: bookingData.longitude }
-      const destination = { lat: simulatedAmbulanceLocation.latitude, lng: simulatedAmbulanceLocation.longitude }
-      
-      updateRoute(origin, destination)
-    } catch (err) {
-      console.error('Tracking Error:', err)
-      setError('Failed to track ambulance. Please try again.')
-    }
-  }, [bookingId, bookingData.latitude, bookingData.longitude, updateRoute])
-
-  const handleTrackAmbulance = () => {
-    setShowMap(true)
-    if (bookingId) {
-      trackAmbulance()
-    } else {
-      setError('No active booking found. Please make a booking first.')
-    }
-  }
-
-  useEffect(() => {
-    let intervalId
-    if (bookingId && showMap) {
-      trackAmbulance()
-      intervalId = setInterval(() => trackAmbulance(), 10000) // Update every 10 seconds
-    }
-    return () => {
-      if (intervalId) clearInterval(intervalId)
-    }
-  }, [bookingId, showMap, trackAmbulance])
-
-  const onMapLoad = useCallback((map) => {
-    mapRef.current = map
-  }, [])
-
-  const panTo = useCallback(({ lat, lng }) => {
-    if (mapRef.current) {
-      mapRef.current.panTo({ lat, lng })
-      mapRef.current.setZoom(14)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (bookingData.latitude && bookingData.longitude) {
-      panTo({ lat: bookingData.latitude, lng: bookingData.longitude })
-    }
-  }, [bookingData.latitude, bookingData.longitude, panTo])
-
-  const handleMarkerClick = (marker) => {
-    setSelectedMarker(marker)
-  }
-
-  if (loadError) {
-    return <div>Error loading maps. Please check your internet connection and try again.</div>
-  }
-
   return (
-    <div className="min-h-screen flex flex-col bg-gray-100 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="bg-white text-gray-800 rounded-lg p-6 max-w-md w-full mx-auto shadow-md mb-8">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-2xl font-bold text-gray-900">
-            {step === 1 && 'Select Emergency Type'}
-            {step === 2 && 'Location Access'}
-            {step === 3 && 'Booking Confirmation'}
-          </h2>
+    <div className="max-w-4xl mx-auto p-4">
+      {error && (
+        <div className="mb-4 p-4 bg-red-100 text-red-700 rounded-md">
+          {error}
         </div>
+      )}
 
-        {step === 1 && (
-          <div className="grid grid-cols-1 gap-3">
+      {step === 1 && (
+        <div>
+          <h2 className="text-2xl font-bold mb-4">Select Emergency Type</h2>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             {emergencyTypes.map((type) => (
               <button
                 key={type.id}
                 onClick={() => handleEmergencyTypeSelect(type.id)}
-                className="flex items-center gap-3 w-full p-4 text-left rounded-lg border border-gray-300 hover:bg-gray-100 transition-colors"
+                className="p-4 border rounded-lg hover:bg-gray-50 transition-colors flex flex-col items-center"
               >
-                <span className="text-2xl">{type.icon}</span>
-                <span className="font-medium">{type.label}</span>
+                <span className="text-3xl mb-2">{type.icon}</span>
+                <span>{type.label}</span>
               </button>
             ))}
           </div>
-        )}
+        </div>
+      )}
 
-        {step === 2 && (
-          <div>
-            <p className="mb-6 text-gray-600">
-              We need your location to send the nearest available ambulance to you.
-              Please enable location access when prompted.
-            </p>
-            <button
-              onClick={getLocation}
-              disabled={loading}
-              className="w-full bg-red-600 text-white py-3 rounded-md hover:bg-red-700 disabled:bg-red-300 disabled:cursor-not-allowed transition duration-300"
-            >
-              {loading ? 'Processing...' : 'Book Now'}
-            </button>
-            {error && (
-              <div className="mt-4 p-3 bg-red-100 text-red-700 rounded-md">
-                {error}
+      {step === 2 && (
+        <div className="text-center">
+          <h2 className="text-2xl font-bold mb-4">Get Your Location</h2>
+          <button
+            onClick={getLocation}
+            disabled={loading}
+            className="bg-blue-500 text-white px-6 py-3 rounded-lg hover:bg-blue-600 transition-colors disabled:bg-gray-400"
+          >
+            {loading ? 'Getting Location...' : 'Get My Location'}
+          </button>
+        </div>
+      )}
+
+      {step === 3 && success && (
+        <div className="bg-white p-6 rounded-lg shadow-md">
+          <h2 className="text-2xl font-bold mb-4">The Allocated Ambulance is:</h2>
+          {ambulanceDetails && (
+            <div className="mb-4">
+              <div className="space-y-2 border-b pb-4">
+                <p><strong>Ambulance Number:</strong> {ambulanceDetails.vehicleNumber}</p>
+                <p><strong>Phone Number:</strong> {ambulanceDetails.contactNumber}</p>
+                <p><strong>Current Location:</strong> {ambulanceDetails.address}</p>
               </div>
-            )}
-          </div>
-        )}
+              
+              {routeDetails && (
+                <div className="mt-4 space-y-4">
+                  <div>
+                    <h3 className="text-xl font-semibold text-green-600 mb-2">Route Details:</h3>
+                    <div className="ml-4 space-y-2">
+                      <p><strong>Distance:</strong> {routeDetails.distance}</p>
+                      <p><strong>Normal Duration:</strong> {routeDetails.current_duration}</p>
+                      <p><strong>Duration in Traffic:</strong> {routeDetails.duration_in_traffic}</p>
+                      <p><strong>Traffic Condition:</strong> {routeDetails.traffic_percentage}</p>
+                    </div>
+                  </div>
 
-        {step === 3 && success && (
-          <div className="text-center">
-            <div className="text-green-500 text-5xl mb-4">✓</div>
-            <h3 className="text-xl font-bold text-green-600 mb-2">Booking Successful!</h3>
-            <p className="text-gray-600 mb-4">
-              An ambulance has been dispatched to your location.
-              Please stay where you are.
-            </p>
+                  <div>
+                    <h3 className="text-xl font-semibold text-green-600 mb-2">Recommended Route:</h3>
+                    <div className="ml-4 bg-gray-50 p-3 rounded-lg">
+                      <p className="text-gray-700">{routeDetails.route_description}</p>
+                    </div>
+                  </div>
+
+                  {alternativeRoutes.length > 0 && (
+                    <div>
+                      <h3 className="text-xl font-semibold text-orange-600 mb-2">Alternative Routes:</h3>
+                      <div className="ml-4 space-y-2">
+                        {alternativeRoutes.map((route, index) => (
+                          <div key={index} className="bg-gray-50 p-2 rounded">
+                            <p><strong>{route.name}:</strong></p>
+                            <p className="ml-4">Traffic: {route.traffic_percentage}</p>
+                            <p className="ml-4">Duration: {route.duration_in_traffic}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          
+          {showTrackButton && (
             <button
               onClick={handleTrackAmbulance}
-              className="w-full bg-blue-600 text-white py-3 rounded-md hover:bg-blue-700 transition duration-300"
+              className="mt-6 bg-green-500 text-white px-6 py-3 rounded-lg hover:bg-green-600 transition-colors w-full"
             >
               Track Ambulance
             </button>
-          </div>
-        )}
-      </div>
-
-      {showMap && tracking && isLoaded && (
-        <div className="w-full h-[80vh] bg-white rounded-lg shadow-md overflow-hidden relative">
-          <button
-            onClick={() => setShowMap(false)}
-            className="absolute top-2 right-2 bg-white text-gray-800 px-3 py-1 rounded-md shadow-md hover:bg-gray-100 transition duration-300 z-10"
-          >
-            Close Tracking
-          </button>
-          <div className="p-4 bg-gray-100">
-            <h2 className="text-2xl font-bold mb-2">Ambulance Tracking</h2>
-            <p className="mb-1">Distance: {tracking.distance}</p>
-            <p className="mb-1">Estimated Arrival Time: {tracking.estimatedTime}</p>
-            {ambulanceDetails && (
-              <div>
-                <p className="mb-1">Vehicle Number: {ambulanceDetails.vehicleNumber}</p>
-                <p className="mb-1">Driver: {ambulanceDetails.driverName}</p>
-                <p>Contact: {ambulanceDetails.contactNumber}</p>
-              </div>
-            )}
-          </div>
-          <GoogleMap
-            mapContainerStyle={mapContainerStyle}
-            center={{ lat: bookingData.latitude, lng: bookingData.longitude }}
-            zoom={14}
-            onLoad={onMapLoad}
-          >
-            {bookingData.latitude && bookingData.longitude && (
-              <Marker
-                position={{ lat: bookingData.latitude, lng: bookingData.longitude }}
-                icon={{
-                  url: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png',
-                  scaledSize: new window.google.maps.Size(40, 40),
-                  origin: new window.google.maps.Point(0, 0),
-                  anchor: new window.google.maps.Point(20, 40),
-                }}
-                onClick={() => handleMarkerClick('user')}
-              />
-            )}
-            {tracking && tracking.ambulanceLocation && (
-              <Marker
-                position={{ lat: tracking.ambulanceLocation.latitude, lng: tracking.ambulanceLocation.longitude }}
-                icon={{
-                  url: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png',
-                  scaledSize: new window.google.maps.Size(40, 40),
-                  origin: new window.google.maps.Point(0, 0),
-                  anchor: new window.google.maps.Point(20, 40),
-                }}
-                onClick={() => handleMarkerClick('ambulance')}
-              />
-            )}
-            {selectedMarker && (
-              <InfoWindow
-                position={
-                  selectedMarker === 'user'
-                    ? { lat: bookingData.latitude, lng: bookingData.longitude }
-                    : { lat: tracking.ambulanceLocation.latitude, lng: tracking.ambulanceLocation.longitude }
-                }
-                onCloseClick={() => setSelectedMarker(null)}
-              >
-                <div>
-                  <h3 className="font-bold">{selectedMarker === 'user' ? 'Your Location' : 'Ambulance Location'}</h3>
-                  <p>{selectedMarker === 'user' ? bookingData.address : 'En route to your location'}</p>
-                </div>
-              </InfoWindow>
-            )}
-            {directions && (
-              <DirectionsRenderer
-                directions={directions}
-                options={{
-                  polylineOptions: {
-                    strokeColor: "#FF0000",
-                    strokeOpacity: 0.8,
-                    strokeWeight: 4,
-                  },
-                }}
-              />
-            )}
-          </GoogleMap>
+          )}
         </div>
       )}
+
+      {showMap && renderMap()}
     </div>
-  )
+  );
 }

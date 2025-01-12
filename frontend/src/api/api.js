@@ -1,11 +1,12 @@
 import axios from 'axios';
 
-const API_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5000';
+// Define base URL
+const API_URL = 'http://localhost:5001';
 
+// Create axios instance
 const api = axios.create({
   baseURL: API_URL,
   timeout: 10000,
-  withCredentials: true,
   headers: {
     'Content-Type': 'application/json'
   }
@@ -55,10 +56,15 @@ export const resendVerification = (email) => {
 // Create emergency booking
 export const createEmergencyBooking = async (bookingData) => {
   try {
+    console.log('Creating emergency booking:', bookingData);
     const response = await api.post('/api/emergency-booking/create', bookingData);
+    console.log('Emergency booking response:', response.data);
     return response.data;
   } catch (error) {
     console.error('Error creating emergency booking:', error);
+    if (error.response) {
+      console.error('Error response:', error.response.data);
+    }
     throw error;
   }
 };
@@ -70,6 +76,22 @@ export const getEmergencyBookingStatus = async (bookingId) => {
     return response.data;
   } catch (error) {
     console.error('Error fetching booking status:', error);
+    throw error;
+  }
+};
+
+// Get ML model prediction for ambulance allocation
+export const getPredictedAmbulance = async (userData) => {
+  try {
+    console.log('Sending prediction request:', userData);
+    const response = await api.post('/predict', {
+      user_latitude: userData.latitude,
+      user_longitude: userData.longitude
+    });
+    console.log('Prediction response:', response.data);
+    return response.data;
+  } catch (error) {
+    console.error('Error getting ambulance prediction:', error);
     throw error;
   }
 };

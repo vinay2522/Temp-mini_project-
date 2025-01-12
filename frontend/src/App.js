@@ -27,6 +27,7 @@ import ConsultationBooking from './components/bookings/ConsultationBooking';
 import BloodRequest from './components/bookings/BloodRequest';
 import Bookings from './components/bookings/Bookings';
 import BloodDonation from './components/services/BloodDonation';
+import BlogPost from './components/BlogPost';
 
 import './styles/global.css';
 import 'leaflet/dist/leaflet.css';
@@ -58,6 +59,7 @@ const App = () => {
                     <Route path="/services/consultation" element={<MedicalConsultation />} />
                     <Route path="/hospitals" element={<Hospitals />} />
                     <Route path="/blog" element={<Blog />} />
+                    <Route path="/blog/:slug" element={<BlogPost />} />
                     <Route path="/gallery" element={<Gallery />} />
                     <Route path="/download" element={<Download />} />
                     <Route path="/helpdesk" element={<HelpDesk />} />
