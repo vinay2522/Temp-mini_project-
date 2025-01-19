@@ -4,7 +4,8 @@ import {
   useJsApiLoader, 
   DirectionsRenderer, 
   MarkerF,
-  OverlayView 
+  OverlayView,
+  InfoWindowF
 } from '@react-google-maps/api'
 import { createEmergencyBooking, getEmergencyBookingStatus, getPredictedAmbulance } from '../api/api'
 
@@ -15,21 +16,36 @@ const mapContainerStyle = {
 }
 
 const wideMapStyle = {
+  width: '100vw',
+  height: '100vh',
   position: 'fixed',
   top: 0,
   left: 0,
-  right: 0,
-  bottom: 0,
-  width: '100vw',
-  height: '100vh',
-  zIndex: 9999,
+  zIndex: 1000,
   backgroundColor: 'white'
 };
 
 const normalMapStyle = {
   width: '100%',
-  height: '60vh',
-  position: 'relative'
+  height: '400px',
+  position: 'relative',
+  borderRadius: '8px',
+  overflow: 'hidden'
+};
+
+const expandButtonStyle = {
+  position: 'absolute',
+  top: '10px',
+  right: '10px',
+  zIndex: 1000,
+  backgroundColor: 'white',
+  border: '1px solid #ccc',
+  borderRadius: '4px',
+  padding: '8px',
+  cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'center',
+  gap: '4px'
 };
 
 const libraries = ['places', 'geometry', 'marker']
@@ -38,6 +54,15 @@ const defaultCenter = {
   lat: 12.9716,
   lng: 77.5946
 }
+
+const mapControlsStyle = {
+  position: 'absolute',
+  top: '1rem',
+  right: '1rem',
+  zIndex: 2000,
+  display: 'flex',
+  gap: '0.5rem'
+};
 
 export default function BookingForm() {
   const [step, setStep] = useState(1)
@@ -65,6 +90,7 @@ export default function BookingForm() {
   const [showTrackButton, setShowTrackButton] = useState(true);
   const [alternativeRoutes, setAlternativeRoutes] = useState([]);
   const [currentProgress, setCurrentProgress] = useState(0)
+  const [showInfoWindow, setShowInfoWindow] = useState(false);
 
   const mapRef = useRef(null)
   const trackingIntervalRef = useRef(null)
@@ -177,18 +203,58 @@ export default function BookingForm() {
   }, [isLoaded, bookingData.latitude, bookingData.longitude, ambulanceLocation, calculateRouteDistance]);
 
   const handleTrackAmbulance = () => {
+    setIsTracking(true);
     setShowMap(true);
     setShowTrackButton(false);
-    // Calculate route immediately when showing map
-    if (userLocation && ambulanceLocation) {
-      calculateRouteDistance();
+  };
+
+  const handleStopTracking = () => {
+    setIsTracking(false);
+    setShowMap(false);
+    setShowTrackButton(true);
+    setIsWideMap(false);
+    setSelectedMarker(null);
+  };
+
+  const handleMapExpand = () => {
+    setIsWideMap(true);
+    // When expanding, we want to recenter the map
+    if (mapRef.current) {
+      const map = mapRef.current;
+      google.maps.event.trigger(map, 'resize');
+      if (center) {
+        map.panTo(center);
+      }
+    }
+  };
+
+  const handleMapShrink = () => {
+    setIsWideMap(false);
+    // When shrinking, we want to recenter the map
+    if (mapRef.current) {
+      const map = mapRef.current;
+      google.maps.event.trigger(map, 'resize');
+      if (center) {
+        map.panTo(center);
+      }
     }
   };
 
   const handleCloseMap = () => {
     setShowMap(false);
     setShowTrackButton(true);
+    setSelectedMarker(null);
     setIsWideMap(false);
+  };
+
+  const handleMarkerClick = (markerType) => {
+    setSelectedMarker(markerType);
+    setShowInfoWindow(true);
+  };
+
+  const handleInfoWindowClose = () => {
+    setSelectedMarker(null);
+    setShowInfoWindow(false);
   };
 
   const calculateRoute = (origin, destination) => {
@@ -240,18 +306,36 @@ export default function BookingForm() {
 
     return (
       <div style={isWideMap ? wideMapStyle : normalMapStyle}>
-        <div className="absolute top-4 right-4 z-[10000] flex gap-2">
-          <button
-            onClick={() => setIsWideMap(!isWideMap)}
-            className="px-4 py-2 bg-white rounded-md shadow-lg hover:bg-gray-100 transition-colors"
-          >
-            {isWideMap ? 'Shrink Map' : 'Expand Map'}
-          </button>
+        <div style={mapControlsStyle}>
+          {isWideMap ? (
+            <button
+              onClick={handleMapShrink}
+              className="bg-white px-4 py-2 rounded-lg shadow-md hover:bg-gray-100 transition-colors flex items-center gap-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M5 10a1 1 0 011-1h8a1 1 0 110 2H6a1 1 0 01-1-1z" clipRule="evenodd" />
+              </svg>
+              <span>Shrink Map</span>
+            </button>
+          ) : (
+            <button
+              onClick={handleMapExpand}
+              className="bg-white px-4 py-2 rounded-lg shadow-md hover:bg-gray-100 transition-colors flex items-center gap-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
+              </svg>
+              <span>Expand Map</span>
+            </button>
+          )}
           <button
             onClick={handleCloseMap}
-            className="px-4 py-2 bg-white rounded-md shadow-lg hover:bg-gray-100 transition-colors"
+            className="bg-white px-4 py-2 rounded-lg shadow-md hover:bg-gray-100 transition-colors flex items-center gap-2"
           >
-            Close Map
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+            </svg>
+            <span>Close Map</span>
           </button>
         </div>
         
@@ -288,6 +372,13 @@ export default function BookingForm() {
                 url: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png',
                 scaledSize: isLoaded ? new window.google.maps.Size(40, 40) : null
               }}
+              label={{
+                text: "Your Location",
+                className: "marker-label",
+                color: "black",
+                fontSize: "14px",
+                fontWeight: "bold"
+              }}
               onClick={() => setSelectedMarker('user')}
               zIndex={3}
             />
@@ -300,6 +391,13 @@ export default function BookingForm() {
               icon={{
                 url: 'http://maps.google.com/mapfiles/ms/icons/green-dot.png',
                 scaledSize: isLoaded ? new window.google.maps.Size(40, 40) : null
+              }}
+              label={{
+                text: `Ambulance ${ambulanceDetails?.vehicleNumber}`,
+                className: "marker-label",
+                color: "black",
+                fontSize: "14px",
+                fontWeight: "bold"
               }}
               onClick={() => setSelectedMarker('ambulance')}
               zIndex={3}
@@ -487,11 +585,11 @@ export default function BookingForm() {
         }
       });
 
-      if (response && response.booking_id) {
+      if (response && response.success && response.bookingId) {
         setSuccess(true);
         setLoading(false);
         setStep(3);
-        setBookingId(response.booking_id);
+        setBookingId(response.bookingId);
 
         setAmbulanceDetails({
           vehicleNumber: predictionResponse.ambulance_number,
@@ -503,11 +601,11 @@ export default function BookingForm() {
           calculateRouteDistance();
         }
       } else {
-        throw new Error('Booking failed: Invalid response from server');
+        throw new Error(response?.message || 'Booking failed: Invalid response from server');
       }
     } catch (err) {
       console.error('Booking Error:', err);
-      setError('Failed to book ambulance. Please try again.');
+      setError(err.message || 'Failed to book ambulance. Please try again.');
       setLoading(false);
     }
   };
@@ -552,66 +650,186 @@ export default function BookingForm() {
       )}
 
       {step === 3 && success && (
-        <div className="bg-white p-6 rounded-lg shadow-md">
-          <h2 className="text-2xl font-bold mb-4">The Allocated Ambulance is:</h2>
-          {ambulanceDetails && (
-            <div className="mb-4">
-              <div className="space-y-2 border-b pb-4">
-                <p><strong>Ambulance Number:</strong> {ambulanceDetails.vehicleNumber}</p>
-                <p><strong>Phone Number:</strong> {ambulanceDetails.contactNumber}</p>
-                <p><strong>Current Location:</strong> {ambulanceDetails.address}</p>
+        <div className="space-y-6">
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <h2 className="text-2xl font-bold mb-6">The Allocated Ambulance is:</h2>
+            
+            <div className="space-y-4">
+              <div className="flex flex-col">
+                <span className="font-semibold text-gray-700">Ambulance Number:</span>
+                <span className="text-lg">{ambulanceDetails?.vehicleNumber}</span>
               </div>
               
-              {routeDetails && (
-                <div className="mt-4 space-y-4">
-                  <div>
-                    <h3 className="text-xl font-semibold text-green-600 mb-2">Route Details:</h3>
-                    <div className="ml-4 space-y-2">
-                      <p><strong>Distance:</strong> {routeDetails.distance}</p>
-                      <p><strong>Normal Duration:</strong> {routeDetails.current_duration}</p>
-                      <p><strong>Duration in Traffic:</strong> {routeDetails.duration_in_traffic}</p>
-                      <p><strong>Traffic Condition:</strong> {routeDetails.traffic_percentage}</p>
-                    </div>
-                  </div>
+              <div className="flex flex-col">
+                <span className="font-semibold text-gray-700">Phone Number:</span>
+                <span className="text-lg">{ambulanceDetails?.contactNumber}</span>
+              </div>
+              
+              <div className="flex flex-col">
+                <span className="font-semibold text-gray-700">Ambulance Address:</span>
+                <span className="text-lg">{ambulanceDetails?.address}</span>
+              </div>
+              
+              <div className="flex flex-col">
+                <span className="font-semibold text-gray-700">Ambulance Coordinates:</span>
+                <span className="text-lg">({ambulanceLocation?.lat.toFixed(4)}, {ambulanceLocation?.lng.toFixed(4)})</span>
+              </div>
+            </div>
+          </div>
 
-                  <div>
-                    <h3 className="text-xl font-semibold text-green-600 mb-2">Recommended Route:</h3>
-                    <div className="ml-4 bg-gray-50 p-3 rounded-lg">
-                      <p className="text-gray-700">{routeDetails.route_description}</p>
-                    </div>
-                  </div>
-
-                  {alternativeRoutes.length > 0 && (
-                    <div>
-                      <h3 className="text-xl font-semibold text-orange-600 mb-2">Alternative Routes:</h3>
-                      <div className="ml-4 space-y-2">
-                        {alternativeRoutes.map((route, index) => (
-                          <div key={index} className="bg-gray-50 p-2 rounded">
-                            <p><strong>{route.name}:</strong></p>
-                            <p className="ml-4">Traffic: {route.traffic_percentage}</p>
-                            <p className="ml-4">Duration: {route.duration_in_traffic}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+          {routeDetails && (
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <h2 className="text-2xl font-bold mb-6 text-green-600">The Optimized Route is:</h2>
+              
+              <div className="space-y-4">
+                <div className="flex flex-col">
+                  <span className="font-semibold text-gray-700">Route:</span>
+                  <span className="text-lg">{routeDetails.name}</span>
                 </div>
-              )}
+                
+                <div className="flex flex-col">
+                  <span className="font-semibold text-gray-700">Distance:</span>
+                  <span className="text-lg">{parseFloat(routeDetails.distance).toFixed(1)} km</span>
+                </div>
+                
+                <div className="flex flex-col">
+                  <span className="font-semibold text-gray-700">Duration in Traffic:</span>
+                  <span className="text-lg">{parseInt(routeDetails.duration_in_traffic)} min</span>
+                </div>
+                
+                <div className="flex flex-col">
+                  <span className="font-semibold text-gray-700">Traffic Percentage:</span>
+                  <span className="text-lg">{parseFloat(routeDetails.traffic_percentage).toFixed(1)}%</span>
+                </div>
+              </div>
             </div>
           )}
-          
-          {showTrackButton && (
-            <button
-              onClick={handleTrackAmbulance}
-              className="mt-6 bg-green-500 text-white px-6 py-3 rounded-lg hover:bg-green-600 transition-colors w-full"
-            >
-              Track Ambulance
-            </button>
+
+          {!showMap && showTrackButton && (
+            <div className="flex justify-center mt-6">
+              <button
+                onClick={handleTrackAmbulance}
+                className="bg-green-500 text-white px-8 py-3 rounded-lg hover:bg-green-600 transition-colors text-lg font-semibold shadow-md"
+              >
+                Track Ambulance
+              </button>
+            </div>
+          )}
+
+          {showMap && (
+            <div className="relative">
+              <div style={isWideMap ? wideMapStyle : normalMapStyle}>
+                <div style={mapControlsStyle}>
+                  {isWideMap ? (
+                    <button
+                      onClick={handleMapShrink}
+                      className="bg-white px-4 py-2 rounded-lg shadow-md hover:bg-gray-100 transition-colors flex items-center gap-2"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M5 10a1 1 0 011-1h8a1 1 0 110 2H6a1 1 0 01-1-1z" clipRule="evenodd" />
+                      </svg>
+                      <span>Shrink Map</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleMapExpand}
+                      className="bg-white px-4 py-2 rounded-lg shadow-md hover:bg-gray-100 transition-colors flex items-center gap-2"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
+                      </svg>
+                      <span>Expand Map</span>
+                    </button>
+                  )}
+                  <button
+                    onClick={handleCloseMap}
+                    className="bg-white px-4 py-2 rounded-lg shadow-md hover:bg-gray-100 transition-colors flex items-center gap-2"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                    </svg>
+                    <span>Close Map</span>
+                  </button>
+                </div>
+                
+                {isLoaded ? (
+                  <GoogleMap
+                    mapContainerStyle={isWideMap ? wideMapStyle : normalMapStyle}
+                    center={center}
+                    zoom={13}
+                    onLoad={(map) => {
+                      mapRef.current = map;
+                      if (onMapLoad) onMapLoad(map);
+                    }}
+                    options={{
+                      zoomControl: true,
+                      streetViewControl: true,
+                      mapTypeControl: true,
+                      fullscreenControl: false
+                    }}
+                  >
+                    {userLocation && (
+                      <>
+                        <MarkerF
+                          position={userLocation}
+                          icon={{
+                            url: '/user-location.png',
+                            scaledSize: new window.google.maps.Size(40, 40)
+                          }}
+                          onClick={() => handleMarkerClick('user')}
+                        />
+                        {selectedMarker === 'user' && (
+                          <InfoWindowF
+                            position={userLocation}
+                            onCloseClick={handleInfoWindowClose}
+                          >
+                            <div className="p-2">
+                              <h3 className="font-semibold text-lg mb-1">Your Location</h3>
+                              <p className="text-gray-600">Coordinates: ({userLocation.lat.toFixed(4)}, {userLocation.lng.toFixed(4)})</p>
+                            </div>
+                          </InfoWindowF>
+                        )}
+                      </>
+                    )}
+                    
+                    {ambulanceLocation && (
+                      <>
+                        <MarkerF
+                          position={ambulanceLocation}
+                          icon={{
+                            url: '/ambulance-icon.png',
+                            scaledSize: new window.google.maps.Size(40, 40)
+                          }}
+                          onClick={() => handleMarkerClick('ambulance')}
+                        />
+                        {selectedMarker === 'ambulance' && (
+                          <InfoWindowF
+                            position={ambulanceLocation}
+                            onCloseClick={handleInfoWindowClose}
+                          >
+                            <div className="p-2">
+                              <h3 className="font-semibold text-lg mb-1">Ambulance Details</h3>
+                              <p className="text-gray-600 mb-1">Vehicle: {ambulanceDetails?.vehicleNumber}</p>
+                              <p className="text-gray-600 mb-1">Phone: {ambulanceDetails?.contactNumber}</p>
+                              <p className="text-gray-600">Address: {ambulanceDetails?.address}</p>
+                            </div>
+                          </InfoWindowF>
+                        )}
+                      </>
+                    )}
+                    
+                    {directions && <DirectionsRenderer directions={directions} />}
+                  </GoogleMap>
+                ) : (
+                  <div className="h-full flex items-center justify-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </div>
       )}
-
-      {showMap && renderMap()}
     </div>
   );
 }

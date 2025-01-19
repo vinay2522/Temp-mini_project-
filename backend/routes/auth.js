@@ -185,7 +185,7 @@ router.post('/verify-otp', async (req, res) => {
         mobileNumber: user.mobileNumber
       },
       process.env.JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '7d' }
     );
 
     res.json({
@@ -242,7 +242,7 @@ router.post('/login', async (req, res) => {
     const token = jwt.sign(
       { userId: user._id },
       process.env.JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '7d' }
     );
 
     // Remove sensitive data

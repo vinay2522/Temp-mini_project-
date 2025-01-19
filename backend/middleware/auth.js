@@ -22,7 +22,8 @@ const authenticateToken = (req, res, next) => {
         if (!decodedToken || !decodedToken.userId) {
             return res.status(401).json({ 
                 success: false,
-                message: 'Invalid token' 
+                message: 'Invalid token',
+                shouldRefresh: true
             });
         }
 

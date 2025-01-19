@@ -1,11 +1,20 @@
 import axios from 'axios';
 
-// Define base URL
-const API_URL = 'http://localhost:5001';
+// Define base URLs
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+const ML_API_URL = process.env.REACT_APP_ML_API_URL || 'http://localhost:5001';
 
-// Create axios instance
+// Create axios instances
 const api = axios.create({
   baseURL: API_URL,
+  timeout: 10000,
+  headers: {
+    'Content-Type': 'application/json'
+  }
+});
+
+const mlApi = axios.create({
+  baseURL: ML_API_URL,
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json'
@@ -62,8 +71,8 @@ export const createEmergencyBooking = async (bookingData) => {
     return response.data;
   } catch (error) {
     console.error('Error creating emergency booking:', error);
-    if (error.response) {
-      console.error('Error response:', error.response.data);
+    if (error.response?.data) {
+      throw new Error(error.response.data.message || 'Failed to create emergency booking');
     }
     throw error;
   }
@@ -76,6 +85,9 @@ export const getEmergencyBookingStatus = async (bookingId) => {
     return response.data;
   } catch (error) {
     console.error('Error fetching booking status:', error);
+    if (error.response?.data) {
+      throw new Error(error.response.data.message || 'Failed to fetch booking status');
+    }
     throw error;
   }
 };
@@ -84,7 +96,7 @@ export const getEmergencyBookingStatus = async (bookingId) => {
 export const getPredictedAmbulance = async (userData) => {
   try {
     console.log('Sending prediction request:', userData);
-    const response = await api.post('/predict', {
+    const response = await mlApi.post('/predict', {
       user_latitude: userData.latitude,
       user_longitude: userData.longitude
     });
@@ -92,6 +104,9 @@ export const getPredictedAmbulance = async (userData) => {
     return response.data;
   } catch (error) {
     console.error('Error getting ambulance prediction:', error);
+    if (error.response?.data) {
+      throw new Error(error.response.data.message || 'Failed to get ambulance prediction');
+    }
     throw error;
   }
 };
@@ -103,6 +118,9 @@ export const createDetailedBooking = async (bookingData) => {
     return response.data;
   } catch (error) {
     console.error('Error creating detailed booking:', error);
+    if (error.response?.data) {
+      throw new Error(error.response.data.message || 'Failed to create detailed booking');
+    }
     throw error;
   }
 };
@@ -113,6 +131,9 @@ export const getMyBookings = async () => {
     return response.data;
   } catch (error) {
     console.error('Error fetching bookings:', error);
+    if (error.response?.data) {
+      throw new Error(error.response.data.message || 'Failed to fetch bookings');
+    }
     throw error;
   }
 };
@@ -123,6 +144,9 @@ export const getBookingDetails = async (bookingId) => {
     return response.data;
   } catch (error) {
     console.error('Error fetching booking details:', error);
+    if (error.response?.data) {
+      throw new Error(error.response.data.message || 'Failed to fetch booking details');
+    }
     throw error;
   }
 };
@@ -133,6 +157,9 @@ export const updateBookingStatus = async (bookingId, status) => {
     return response.data;
   } catch (error) {
     console.error('Error updating booking status:', error);
+    if (error.response?.data) {
+      throw new Error(error.response.data.message || 'Failed to update booking status');
+    }
     throw error;
   }
 };
