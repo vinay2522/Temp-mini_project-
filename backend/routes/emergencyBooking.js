@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const EmergencyBooking = require('../models/EmergencyBooking');
 const { v4: uuidv4 } = require('uuid');
+const { sendNotificationToDriver } = require('../services/firebaseService');
 
 // Create emergency booking
 router.post('/create', async (req, res) => {
@@ -35,9 +36,10 @@ router.post('/create', async (req, res) => {
             });
         }
 
+        // Create booking first
         const bookingId = uuidv4();
-        
         const emergencyBooking = new EmergencyBooking({
+            bookingId,
             emergencyType,
             location: {
                 latitude: parseFloat(latitude),
@@ -50,38 +52,57 @@ router.post('/create', async (req, res) => {
                 address: ambulanceDetails.address,
                 coordinates: ambulanceDetails.coordinates
             },
-            bookingId,
-            status: 'ASSIGNED'
+            status: 'PENDING'
         });
 
         await emergencyBooking.save();
 
+        // Send notification to driver
+        let notificationResult = { success: false, error: null };
+        try {
+            notificationResult = await sendNotificationToDriver(
+                ambulanceDetails.phoneNumber,
+                {
+                    bookingId,
+                    emergencyType,
+                    location: {
+                        latitude: parseFloat(latitude),
+                        longitude: parseFloat(longitude),
+                        address
+                    }
+                }
+            );
+        } catch (notificationError) {
+            console.error('Error sending notification:', notificationError);
+            notificationResult = { 
+                success: false, 
+                error: notificationError.message 
+            };
+        }
+
+        // Return success response even if notification fails
         res.status(201).json({
             success: true,
-            bookingId,
             message: 'Emergency booking created successfully',
-            booking: {
-                id: bookingId,
-                emergencyType,
-                location: {
-                    latitude,
-                    longitude,
-                    address
-                },
+            data: {
+                bookingId: emergencyBooking.bookingId,
+                status: emergencyBooking.status,
+                emergencyType: emergencyBooking.emergencyType,
+                location: emergencyBooking.location,
                 ambulanceDetails: {
-                    vehicleNumber: ambulanceDetails.vehicleNumber,
-                    phoneNumber: ambulanceDetails.phoneNumber,
-                    address: ambulanceDetails.address,
-                    coordinates: ambulanceDetails.coordinates
-                },
-                status: 'ASSIGNED'
-            }
+                    vehicleNumber: emergencyBooking.ambulanceDetails.vehicleNumber,
+                    phoneNumber: emergencyBooking.ambulanceDetails.phoneNumber,
+                    address: emergencyBooking.ambulanceDetails.address
+                }
+            },
+            notificationSent: notificationResult.success
         });
+
     } catch (error) {
-        console.error('Emergency booking error:', error);
+        console.error('Error creating emergency booking:', error);
         res.status(500).json({
             success: false,
-            message: 'Failed to create emergency booking',
+            message: 'Error creating emergency booking',
             error: error.message
         });
     }
@@ -123,7 +144,9 @@ router.get('/status/:bookingId', async (req, res) => {
 // Update booking status
 router.put('/status/:bookingId', async (req, res) => {
     try {
-        const { status } = req.body;
+        const { bookingId } = req.params;
+        const { status, driverResponse } = req.body;
+
         if (!status) {
             return res.status(400).json({
                 success: false,
@@ -131,7 +154,8 @@ router.put('/status/:bookingId', async (req, res) => {
             });
         }
 
-        const booking = await EmergencyBooking.findOne({ bookingId: req.params.bookingId });
+        const booking = await EmergencyBooking.findOne({ bookingId });
+        
         if (!booking) {
             return res.status(404).json({
                 success: false,
@@ -140,22 +164,59 @@ router.put('/status/:bookingId', async (req, res) => {
         }
 
         booking.status = status;
+
+        if (status === 'REJECTED' && driverResponse === 'REJECTED') {
+            // Get new prediction from ML model for another ambulance
+            try {
+                const response = await fetch(`${process.env.ML_API_URL}/predict`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        latitude: booking.location.latitude,
+                        longitude: booking.location.longitude
+                    })
+                });
+
+                const newPrediction = await response.json();
+                
+                if (newPrediction.success) {
+                    booking.ambulanceDetails = {
+                        vehicleNumber: newPrediction.ambulance.vehicleNumber,
+                        phoneNumber: newPrediction.ambulance.phoneNumber,
+                        address: newPrediction.ambulance.address,
+                        coordinates: newPrediction.ambulance.coordinates
+                    };
+                    
+                    // Send notification to new driver
+                    await sendNotificationToDriver(
+                        newPrediction.ambulance.phoneNumber,
+                        {
+                            bookingId: booking.bookingId,
+                            emergencyType: booking.emergencyType,
+                            location: booking.location
+                        }
+                    );
+                }
+            } catch (error) {
+                console.error('Error getting new prediction:', error);
+            }
+        }
+
         await booking.save();
 
         res.json({
             success: true,
             message: 'Booking status updated successfully',
-            booking: {
-                id: booking.bookingId,
-                status: booking.status,
-                updatedAt: booking.updatedAt
-            }
+            data: booking
         });
+
     } catch (error) {
-        console.error('Update booking status error:', error);
+        console.error('Error updating booking status:', error);
         res.status(500).json({
             success: false,
-            message: 'Failed to update booking status',
+            message: 'Error updating booking status',
             error: error.message
         });
     }

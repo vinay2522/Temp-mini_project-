@@ -91,6 +91,9 @@ export default function BookingForm() {
   const [alternativeRoutes, setAlternativeRoutes] = useState([]);
   const [currentProgress, setCurrentProgress] = useState(0)
   const [showInfoWindow, setShowInfoWindow] = useState(false);
+  const [bookingStatus, setBookingStatus] = useState('PENDING');
+  const [driverLocation, setDriverLocation] = useState(null);
+  const [bookingError, setBookingError] = useState(null);
 
   const mapRef = useRef(null)
   const trackingIntervalRef = useRef(null)
@@ -404,6 +407,25 @@ export default function BookingForm() {
             />
           )}
 
+          {/* Driver Location Marker */}
+          {driverLocation && (
+            <MarkerF
+              position={driverLocation}
+              icon={{
+                url: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png',
+                scaledSize: isLoaded ? new window.google.maps.Size(40, 40) : null
+              }}
+              label={{
+                text: "Driver Location",
+                className: "marker-label",
+                color: "black",
+                fontSize: "14px",
+                fontWeight: "bold"
+              }}
+              zIndex={3}
+            />
+          )}
+
           {/* Custom Info Overlay */}
           {selectedMarker && (
             <OverlayView
@@ -413,7 +435,9 @@ export default function BookingForm() {
                       lat: parseFloat(bookingData.latitude),
                       lng: parseFloat(bookingData.longitude)
                     }
-                  : ambulanceLocation
+                  : selectedMarker === 'ambulance'
+                    ? ambulanceLocation
+                    : driverLocation
               }
               mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
               getPixelPositionOffset={(width, height) => ({
@@ -452,7 +476,7 @@ export default function BookingForm() {
                   marginBottom: '8px',
                   paddingRight: '20px'
                 }}>
-                  {selectedMarker === 'user' ? 'Your Location' : 'Ambulance Location'}
+                  {selectedMarker === 'user' ? 'Your Location' : selectedMarker === 'ambulance' ? 'Ambulance Location' : 'Driver Location'}
                 </div>
                 <div style={{
                   fontSize: '13px',
@@ -460,7 +484,9 @@ export default function BookingForm() {
                 }}>
                   {selectedMarker === 'user' 
                     ? bookingData.address 
-                    : ambulanceDetails?.ambulance_address
+                    : selectedMarker === 'ambulance'
+                      ? ambulanceDetails?.ambulance_address
+                      : `Driver is on the way!`
                   }
                 </div>
               </div>
@@ -470,6 +496,52 @@ export default function BookingForm() {
       </div>
     );
   };
+
+  useEffect(() => {
+    let pollingInterval;
+    
+    const pollBookingStatus = async (bookingId) => {
+      try {
+        const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/emergency-booking/status/${bookingId}`);
+        const data = await response.json();
+        
+        if (data.success) {
+          setBookingStatus(data.data.status);
+          
+          // Update driver location if booking is accepted
+          if (data.data.status === 'ACCEPTED' && data.data.ambulanceDetails?.coordinates) {
+            setDriverLocation({
+              lat: data.data.ambulanceDetails.coordinates.latitude,
+              lng: data.data.ambulanceDetails.coordinates.longitude
+            });
+          }
+          
+          // If rejected, show new ambulance being assigned
+          if (data.data.status === 'REJECTED') {
+            setBookingError('Previous driver rejected. Finding new ambulance...');
+            // The backend will automatically find a new ambulance
+          }
+          
+          // Stop polling if we reach a final state
+          if (['COMPLETED', 'CANCELLED'].includes(data.data.status)) {
+            clearInterval(pollingInterval);
+          }
+        }
+      } catch (error) {
+        console.error('Error polling booking status:', error);
+      }
+    };
+
+    if (bookingId) {
+      pollingInterval = setInterval(() => pollBookingStatus(bookingId), 5000);
+    }
+
+    return () => {
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+      }
+    };
+  }, [bookingId]);
 
   const emergencyTypes = [
     { id: 'cardiac', label: 'Cardiac Arrest', icon: '🫀' },
@@ -483,6 +555,128 @@ export default function BookingForm() {
     setBookingData({ ...bookingData, emergencyType: type })
     setStep(2)
   }
+
+  const handleSubmit = async (event) => {
+    if (event) {
+      event.preventDefault();
+    }
+    setLoading(true);
+    setBookingError(null);
+    setError('');
+
+    try {
+      // Get current location
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(async (position) => {
+          try {
+            const { latitude, longitude } = position.coords;
+            
+            // Get address from coordinates
+            const geocoder = new window.google.maps.Geocoder();
+            const latlng = { lat: latitude, lng: longitude };
+            
+            geocoder.geocode({ location: latlng }, async (results, status) => {
+              if (status === 'OK') {
+                try {
+                  const address = results[0].formatted_address;
+                  
+                  // Get predicted ambulance
+                  const predictionResponse = await getPredictedAmbulance({
+                    latitude,
+                    longitude
+                  });
+
+                  if (!predictionResponse || !predictionResponse.ambulance_number) {
+                    throw new Error('Failed to get ambulance prediction');
+                  }
+
+                  // Parse ambulance coordinates
+                  const coordsMatch = predictionResponse.ambulance_coordinates.match(/\(([-\d.]+),\s*([-\d.]+)\)/);
+                  if (coordsMatch) {
+                    const [_, ambLat, ambLng] = coordsMatch;
+                    const ambLocation = {
+                      lat: parseFloat(ambLat),
+                      lng: parseFloat(ambLng)
+                    };
+                    setAmbulanceLocation(ambLocation);
+                  }
+
+                  // Set route details from ML prediction
+                  if (predictionResponse.optimal_route) {
+                    setRouteDetails({
+                      name: predictionResponse.optimal_route.name,
+                      distance: predictionResponse.optimal_route.distance,
+                      duration_in_traffic: predictionResponse.optimal_route.duration_in_traffic,
+                      traffic_percentage: predictionResponse.optimal_route.traffic_percentage,
+                      route_description: predictionResponse.optimal_route.route_description
+                    });
+                    
+                    if (predictionResponse.optimal_route.alternative_routes) {
+                      setAlternativeRoutes(predictionResponse.optimal_route.alternative_routes);
+                    }
+                  }
+
+                  // Create booking
+                  const bookingResponse = await createEmergencyBooking({
+                    emergencyType: bookingData.emergencyType,
+                    latitude,
+                    longitude,
+                    address,
+                    ambulanceNumber: predictionResponse.ambulance_number,
+                    ambulanceDetails: {
+                      vehicleNumber: predictionResponse.ambulance_number,
+                      phoneNumber: predictionResponse.phone_number,
+                      address: predictionResponse.ambulance_address,
+                      coordinates: predictionResponse.ambulance_coordinates
+                    }
+                  });
+
+                  if (bookingResponse.success) {
+                    setSuccess(true);
+                    setBookingId(bookingResponse.data.bookingId);
+                    setBookingStatus(bookingResponse.data.status);
+                    setStep(3);
+
+                    setAmbulanceDetails({
+                      vehicleNumber: bookingResponse.data.ambulanceDetails.vehicleNumber,
+                      contactNumber: bookingResponse.data.ambulanceDetails.phoneNumber,
+                      address: bookingResponse.data.ambulanceDetails.address
+                    });
+
+                    if (userLocation && ambulanceLocation) {
+                      calculateRouteDistance();
+                    }
+
+                    if (!bookingResponse.notificationSent) {
+                      console.warn('Notification could not be sent to driver, but booking was created');
+                    }
+
+                    setLoading(false);
+                  } else {
+                    throw new Error(bookingResponse.message || 'Failed to create booking');
+                  }
+                } catch (err) {
+                  throw new Error(err.message || 'Failed to process booking');
+                }
+              } else {
+                throw new Error('Failed to get address from coordinates');
+              }
+            });
+          } catch (error) {
+            throw error;
+          }
+        }, (error) => {
+          throw new Error(`Location error: ${error.message}`);
+        });
+      } else {
+        throw new Error('Geolocation is not supported by your browser');
+      }
+    } catch (error) {
+      setError(error.message);
+      setBookingError(error.message);
+      setLoading(false);
+    }
+  };
 
   const getLocation = () => {
     setLoading(true)
@@ -512,7 +706,7 @@ export default function BookingForm() {
           if (status === 'OK') {
             if (results[0]) {
               setBookingData(prev => ({ ...prev, address: results[0].formatted_address }))
-              await handleBooking(lat, lng, results[0].formatted_address)
+              await handleSubmit();
             } else {
               setError('No address found for this location.')
               setLoading(false)
@@ -529,86 +723,6 @@ export default function BookingForm() {
       }
     )
   }
-
-  const handleBooking = async (lat, lon, address) => {
-    try {
-      const bookingPayload = {
-        emergencyType: bookingData.emergencyType,
-        latitude: lat,
-        longitude: lon,
-        address: address
-      }
-
-      const predictionResponse = await getPredictedAmbulance({
-        latitude: lat,
-        longitude: lon
-      });
-
-      if (!predictionResponse || !predictionResponse.ambulance_number) {
-        throw new Error('Failed to get ambulance prediction');
-      }
-
-      // Parse ambulance coordinates
-      const coordsMatch = predictionResponse.ambulance_coordinates.match(/\(([-\d.]+),\s*([-\d.]+)\)/);
-      if (coordsMatch) {
-        const [_, ambLat, ambLng] = coordsMatch;
-        const ambLocation = {
-          lat: parseFloat(ambLat),
-          lng: parseFloat(ambLng)
-        };
-        setAmbulanceLocation(ambLocation);
-      }
-
-      // Set route details from ML prediction
-      if (predictionResponse.optimal_route) {
-        setRouteDetails({
-          name: predictionResponse.optimal_route.name,
-          distance: predictionResponse.optimal_route.distance,
-          duration_in_traffic: predictionResponse.optimal_route.duration_in_traffic,
-          traffic_percentage: predictionResponse.optimal_route.traffic_percentage,
-          route_description: predictionResponse.optimal_route.route_description
-        });
-        
-        if (predictionResponse.optimal_route.alternative_routes) {
-          setAlternativeRoutes(predictionResponse.optimal_route.alternative_routes);
-        }
-      }
-
-      const response = await createEmergencyBooking({
-        ...bookingPayload,
-        ambulanceNumber: predictionResponse.ambulance_number,
-        ambulanceDetails: {
-          vehicleNumber: predictionResponse.ambulance_number,
-          phoneNumber: predictionResponse.phone_number,
-          address: predictionResponse.ambulance_address,
-          coordinates: predictionResponse.ambulance_coordinates
-        }
-      });
-
-      if (response && response.success && response.bookingId) {
-        setSuccess(true);
-        setLoading(false);
-        setStep(3);
-        setBookingId(response.bookingId);
-
-        setAmbulanceDetails({
-          vehicleNumber: predictionResponse.ambulance_number,
-          contactNumber: predictionResponse.phone_number,
-          address: predictionResponse.ambulance_address
-        });
-
-        if (userLocation && ambulanceLocation) {
-          calculateRouteDistance();
-        }
-      } else {
-        throw new Error(response?.message || 'Booking failed: Invalid response from server');
-      }
-    } catch (err) {
-      console.error('Booking Error:', err);
-      setError(err.message || 'Failed to book ambulance. Please try again.');
-      setLoading(false);
-    }
-  };
 
   return (
     <div className="max-w-4xl mx-auto p-4">
@@ -702,6 +816,41 @@ export default function BookingForm() {
                   <span className="text-lg">{parseFloat(routeDetails.traffic_percentage).toFixed(1)}%</span>
                 </div>
               </div>
+            </div>
+          )}
+
+          {bookingStatus === 'PENDING' && (
+            <div className="bg-yellow-100 rounded-lg shadow-md p-6">
+              <h2 className="text-2xl font-bold mb-6 text-yellow-600">Booking Status:</h2>
+              <p className="text-lg">Your booking is pending. Please wait for the driver to accept.</p>
+            </div>
+          )}
+
+          {bookingStatus === 'ACCEPTED' && (
+            <div className="bg-green-100 rounded-lg shadow-md p-6">
+              <h2 className="text-2xl font-bold mb-6 text-green-600">Booking Status:</h2>
+              <p className="text-lg">Your booking has been accepted. The driver is on the way!</p>
+            </div>
+          )}
+
+          {bookingStatus === 'REJECTED' && (
+            <div className="bg-red-100 rounded-lg shadow-md p-6">
+              <h2 className="text-2xl font-bold mb-6 text-red-600">Booking Status:</h2>
+              <p className="text-lg">Your booking has been rejected. We are finding a new ambulance for you.</p>
+            </div>
+          )}
+
+          {bookingStatus === 'COMPLETED' && (
+            <div className="bg-blue-100 rounded-lg shadow-md p-6">
+              <h2 className="text-2xl font-bold mb-6 text-blue-600">Booking Status:</h2>
+              <p className="text-lg">Your booking has been completed. Thank you for using our service!</p>
+            </div>
+          )}
+
+          {bookingStatus === 'CANCELLED' && (
+            <div className="bg-red-100 rounded-lg shadow-md p-6">
+              <h2 className="text-2xl font-bold mb-6 text-red-600">Booking Status:</h2>
+              <p className="text-lg">Your booking has been cancelled.</p>
             </div>
           )}
 
@@ -812,6 +961,30 @@ export default function BookingForm() {
                               <p className="text-gray-600 mb-1">Vehicle: {ambulanceDetails?.vehicleNumber}</p>
                               <p className="text-gray-600 mb-1">Phone: {ambulanceDetails?.contactNumber}</p>
                               <p className="text-gray-600">Address: {ambulanceDetails?.address}</p>
+                            </div>
+                          </InfoWindowF>
+                        )}
+                      </>
+                    )}
+                    
+                    {driverLocation && (
+                      <>
+                        <MarkerF
+                          position={driverLocation}
+                          icon={{
+                            url: '/driver-icon.png',
+                            scaledSize: new window.google.maps.Size(40, 40)
+                          }}
+                          onClick={() => handleMarkerClick('driver')}
+                        />
+                        {selectedMarker === 'driver' && (
+                          <InfoWindowF
+                            position={driverLocation}
+                            onCloseClick={handleInfoWindowClose}
+                          >
+                            <div className="p-2">
+                              <h3 className="font-semibold text-lg mb-1">Driver Location</h3>
+                              <p className="text-gray-600">The driver is on the way!</p>
                             </div>
                           </InfoWindowF>
                         )}
