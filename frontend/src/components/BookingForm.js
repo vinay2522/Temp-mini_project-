@@ -221,7 +221,7 @@ export default function BookingForm() {
     // When expanding, we want to recenter the map
     if (mapRef.current) {
       const map = mapRef.current;
-      google.maps.event.trigger(map, 'resize');
+      window.google.maps.event.trigger(map, 'resize');
       if (center) {
         map.panTo(center);
       }
@@ -233,7 +233,7 @@ export default function BookingForm() {
     // When shrinking, we want to recenter the map
     if (mapRef.current) {
       const map = mapRef.current;
-      google.maps.event.trigger(map, 'resize');
+      window.google.maps.event.trigger(map, 'resize');
       if (center) {
         map.panTo(center);
       }
