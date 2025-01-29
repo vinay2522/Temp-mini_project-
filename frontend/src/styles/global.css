@@ -1,0 +1,101 @@
+/* src/styles/global.css */
+
+/* Import fonts */
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Montserrat:wght@700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-50 text-gray-900 font-sans;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-heading;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply px-6 py-2 rounded-full font-semibold transition-colors duration-300 ease-in-out;
+  }
+
+  .btn-primary {
+    @apply bg-primary-500 text-white hover:bg-primary-600;
+  }
+
+  .btn-secondary {
+    @apply bg-secondary-500 text-white hover:bg-secondary-600;
+  }
+
+  .card {
+    @apply bg-white rounded-lg shadow-md p-6;
+  }
+
+  .input {
+    @apply w-full px-4 py-2 rounded-md border border-gray-300 focus:outline-none focus:border-primary-500;
+  }
+
+  .section-title {
+    @apply text-3xl font-bold mb-6 text-primary-500;
+  }
+
+  /* Header styles */
+  .header {
+    @apply bg-white shadow-md;
+  }
+
+  .header-nav {
+    @apply flex items-center space-x-6;
+  }
+
+  .header-link {
+    @apply text-gray-700 hover:text-primary-500 transition-colors duration-300;
+  }
+
+  /* Footer styles */
+  .footer {
+    @apply bg-gray-900 text-white py-12;
+  }
+
+  /* Custom utility classes */
+  .gradient-bg {
+    @apply bg-gradient-to-r from-primary-500 to-secondary-500;
+  }
+
+  .text-shadow {
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+  }
+
+  .hover-scale {
+    @apply transition-transform duration-300 ease-in-out hover:scale-105;
+  }
+}
+
+/* Custom variables */
+:root {
+  --color-seva-red: #FF4136;
+  --color-seva-blue: #0074D9;
+  --color-seva-gray: #AAAAAA;
+  --color-seva-light: #F8F9FA;
+  --color-seva-dark: #343A40;
+  --color-seva-green: #2ECC40;
+  --color-seva-yellow: #FFDC00;
+}
+
+/* Responsive styles */
+@media (max-width: 768px) {
+  .header-nav {
+    @apply flex-col items-start space-y-4;
+  }
+
+  .hero-section {
+    @apply p-6;
+  }
+
+  .section-title {
+    @apply text-2xl;
+  }
+}

@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prediction Result</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f9;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 20px;
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 10px;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
+            background-color: #fff;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        h2 {
+            color: #4CAF50;
+            margin-bottom: 15px;
+        }
+
+        p {
+            color: #555;
+            line-height: 1.6;
+            margin-bottom: 10px;
+        }
+
+        ul {
+            list-style-type: none;
+            padding: 0;
+        }
+
+        li {
+            background-color: #f9f9f9;
+            margin-bottom: 10px;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        strong {
+            color: #333;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 15px;
+            }
+
+            h1, h2 {
+                font-size: 1.5em;
+            }
+
+            p, li {
+                font-size: 0.9em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>The Allocated Ambulance is:</h1>
+        <p><strong>Ambulance Number:</strong> {{ ambulance_number }}</p>
+        <p><strong>Phone Number:</strong> {{ phone_number }}</p>
+        <p><strong>Ambulance Address:</strong> {{ ambulance_address }}</p>
+        <p><strong>Ambulance Coordinates:</strong> {{ ambulance_coordinates }}</p>
+        
+        {% if optimal_route %}
+        <h2>The Optimized Route is:</h2>
+        <p><strong>Route:</strong> {{ optimal_route.route_name }}</p>
+        <p><strong>Distance:</strong> {{ optimal_route.distance }}</p>
+        <p><strong>Duration in Traffic:</strong> {{ optimal_route.duration_in_traffic }}</p>
+        <p><strong>Traffic Percentage:</strong> {{ optimal_route.traffic_percentage }}</p>
+        {% endif %}
+        
+        {% if alternative_routes %}
+        <h2>Alternative Routes:</h2>
+        <ul>
+            {% for route in alternative_routes %}
+            <li>
+                <strong>Route:</strong> {{ route.route_name }}<br>
+                <strong>Distance:</strong> {{ route.distance }}<br>
+                <strong>Duration in Traffic:</strong> {{ route.duration_in_traffic }}<br>
+                <strong>Congestion:</strong> {{ route.congestion_percentage }}
+            </li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+    </div>
+</body>
+</html>

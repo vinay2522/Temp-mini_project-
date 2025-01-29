@@ -1,0 +1,41 @@
+/* alert.css */
+.alert {
+    padding: 1rem;
+    border-radius: 0.5rem;
+    margin-bottom: 1rem;
+    position: relative;
+}
+
+.alert-title {
+    font-weight: bold;
+    margin-bottom: 0.5rem;
+}
+
+.alert-description {
+    margin-bottom: 0.5rem;
+}
+
+.alert.alert-blue-50 {
+    background-color: #ebf8ff;
+    border: 1px solid #bee3f8;
+}
+
+.alert.alert-green-50 {
+    background-color: #f0fff4;
+    border: 1px solid #c6f6d5;
+}
+
+.alert.alert-red-50 {
+    background-color: #fff5f5;
+    border: 1px solid #fed7d7;
+}
+
+.alert-close {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+}

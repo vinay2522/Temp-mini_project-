@@ -1,0 +1,15 @@
+/* src/styles/custom.css */
+@layer utilities {
+  .bg-seva-red {
+    background-color: #ff0000; /* Replace with your desired color */
+  }
+  .bg-seva-blue {
+    background-color: #0000ff; /* Replace with your desired color */
+  }
+  .bg-seva-light {
+    background-color: #f0f0f0; /* Replace with your desired color */
+  }
+  .text-seva-dark {
+    color: #333333; /* Replace with your desired color */
+  }
+}
