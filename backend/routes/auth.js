@@ -235,6 +235,13 @@ router.post('/login', async (req, res) => {
     const { mobileNumber, password } = req.body;
     console.log('Login attempt for:', mobileNumber);
 
+    if (!mobileNumber || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Mobile number and password are required'
+      });
+    }
+
     // Format mobile number consistently
     const formattedNumber = formatMobileNumber(mobileNumber);
     console.log('Formatted mobile number:', formattedNumber);
@@ -246,7 +253,7 @@ router.post('/login', async (req, res) => {
     if (!user) {
       return res.status(401).json({
         success: false,
-        message: 'Invalid mobile number or password'
+        message: 'User not found with this mobile number'
       });
     }
 
@@ -257,7 +264,7 @@ router.post('/login', async (req, res) => {
     if (!isMatch) {
       return res.status(401).json({
         success: false,
-        message: 'Invalid mobile number or password'
+        message: 'Incorrect password'
       });
     }
 
@@ -286,7 +293,7 @@ router.post('/login', async (req, res) => {
     console.error('Login error:', error);
     res.status(500).json({
       success: false,
-      message: 'Login failed. Please try again.'
+      message: error.message || 'An unexpected error occurred. Please try again.'
     });
   }
 });

@@ -8,6 +8,7 @@ import {
   InfoWindowF
 } from '@react-google-maps/api'
 import { createEmergencyBooking, getEmergencyBookingStatus, getPredictedAmbulance } from '../api/api'
+import { toast } from 'react-toastify'
 
 const mapContainerStyle = {
   width: '100%',
@@ -556,6 +557,31 @@ export default function BookingForm() {
     setStep(2)
   }
 
+  const handleLocationError = (error) => {
+    let errorMessage = 'Error getting your location. ';
+    switch(error.code) {
+      case error.PERMISSION_DENIED:
+        errorMessage += 'Please enable location services in your browser.';
+        break;
+      case error.POSITION_UNAVAILABLE:
+        errorMessage += 'Location information is unavailable.';
+        break;
+      case error.TIMEOUT:
+        errorMessage += 'Location request timed out.';
+        break;
+      default:
+        errorMessage += 'An unknown error occurred.';
+    }
+    toast.error(errorMessage, {
+      position: "top-center",
+      autoClose: 5000,
+      hideProgressBar: false,
+      closeOnClick: true,
+      pauseOnHover: true,
+      draggable: true,
+    });
+  };
+
   const handleSubmit = async (event) => {
     if (event) {
       event.preventDefault();
@@ -666,7 +692,7 @@ export default function BookingForm() {
             throw error;
           }
         }, (error) => {
-          throw new Error(`Location error: ${error.message}`);
+          handleLocationError(error);
         });
       } else {
         throw new Error('Geolocation is not supported by your browser');
@@ -675,6 +701,116 @@ export default function BookingForm() {
       setError(error.message);
       setBookingError(error.message);
       setLoading(false);
+    }
+  };
+
+  const handleBookingSubmit = async () => {
+    if (!bookingData.emergencyType) {
+      toast.error('Please select an emergency type', {
+        position: "top-center",
+        autoClose: 4000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+      });
+      return;
+    }
+
+    if (!bookingData.latitude || !bookingData.longitude) {
+      toast.error('Please enable location services or select a location on the map', {
+        position: "top-center",
+        autoClose: 4000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+      });
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const response = await createEmergencyBooking(bookingData);
+      
+      if (response.success) {
+        setBookingId(response.bookingId);
+        toast.success('Emergency booking created successfully! Searching for nearby ambulances...', {
+          position: "top-center",
+          autoClose: 3000,
+          hideProgressBar: false,
+          closeOnClick: true,
+          pauseOnHover: true,
+          draggable: true,
+        });
+        setStep(2);
+      } else {
+        toast.error(response.message || 'Failed to create booking', {
+          position: "top-center",
+          autoClose: 5000,
+          hideProgressBar: false,
+          closeOnClick: true,
+          pauseOnHover: true,
+          draggable: true,
+        });
+      }
+    } catch (error) {
+      console.error('Booking error:', error);
+      toast.error('Failed to create booking. Please try again.', {
+        position: "top-center",
+        autoClose: 5000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCancelBooking = async () => {
+    try {
+      // Add your cancel booking API call here
+      toast.info('Cancelling your booking...', {
+        position: "top-center",
+        autoClose: 2000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+      });
+      
+      // Reset states
+      setStep(1);
+      setBookingId(null);
+      setDirections(null);
+      setAmbulanceDetails(null);
+      setBookingData({
+        emergencyType: '',
+        latitude: null,
+        longitude: null,
+        address: ''
+      });
+      
+      toast.success('Booking cancelled successfully', {
+        position: "top-center",
+        autoClose: 3000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+      });
+    } catch (error) {
+      console.error('Cancel booking error:', error);
+      toast.error('Failed to cancel booking', {
+        position: "top-center",
+        autoClose: 4000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+      });
     }
   };
 
@@ -718,8 +854,7 @@ export default function BookingForm() {
         })
       },
       (error) => {
-        setError('Failed to get your location. Please try again.')
-        setLoading(false)
+        handleLocationError(error);
       }
     )
   }

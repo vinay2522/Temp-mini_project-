@@ -35,19 +35,40 @@ const Register = () => {
     // Validate mobile number
     const cleanNumber = mobileNumber.replace(/\D/g, '');
     if (!/^[6-9]\d{9}$/.test(cleanNumber)) {
-      toast.error('Please enter a valid 10-digit Indian mobile number');
+      toast.error('Please enter a valid 10-digit Indian mobile number', {
+        position: "top-center",
+        autoClose: 4000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+      });
       return false;
     }
 
     // Validate password
     if (password.length < 6) {
-      toast.error('Password must be at least 6 characters long');
+      toast.error('Password must be at least 6 characters long', {
+        position: "top-center",
+        autoClose: 4000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+      });
       return false;
     }
 
     // Validate password match
     if (password !== confirmPassword) {
-      toast.error('Passwords do not match');
+      toast.error('Passwords do not match', {
+        position: "top-center",
+        autoClose: 4000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+      });
       return false;
     }
 
@@ -71,13 +92,42 @@ const Register = () => {
       if (response.success) {
         setOtpData(prev => ({ ...prev, userId: response.userId }));
         setShowOtpInput(true);
-        toast.success('OTP sent to your mobile number. Please verify.');
+        toast.success('OTP sent successfully! Please check your mobile for verification code.', {
+          position: "top-center",
+          autoClose: 5000,
+          hideProgressBar: false,
+          closeOnClick: true,
+          pauseOnHover: true,
+          draggable: true,
+        });
       } else {
-        toast.error(response.message || 'Registration failed');
+        toast.error(response.message || 'Registration failed. Please try again.', {
+          position: "top-center",
+          autoClose: 5000,
+          hideProgressBar: false,
+          closeOnClick: true,
+          pauseOnHover: true,
+          draggable: true,
+        });
       }
     } catch (error) {
       console.error('Registration error:', error);
-      toast.error(error.message || 'Registration failed');
+      let errorMessage = 'Registration failed. Please try again.';
+      
+      if (error.message.includes('exists')) {
+        errorMessage = 'This mobile number is already registered. Please login instead.';
+      } else if (error.message.includes('network')) {
+        errorMessage = 'Network error. Please check your internet connection.';
+      }
+      
+      toast.error(errorMessage, {
+        position: "top-center",
+        autoClose: 5000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+      });
     } finally {
       setLoading(false);
     }
@@ -87,7 +137,14 @@ const Register = () => {
     e.preventDefault();
     
     if (!otpData.otp || otpData.otp.length !== 6) {
-      toast.error('Please enter a valid 6-digit OTP');
+      toast.error('Please enter a valid 6-digit OTP', {
+        position: "top-center",
+        autoClose: 4000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+      });
       return;
     }
     
@@ -97,24 +154,40 @@ const Register = () => {
       const response = await verifyOTP(otpData.userId, otpData.otp);
       
       if (response.success) {
-        // Store token if provided
-        if (response.token) {
-          localStorage.setItem('token', response.token);
-        }
-        
-        toast.success('Mobile number verified successfully!');
-        navigate('/login', { 
-          state: { 
-            mobileNumber: formData.mobileNumber,
-            message: 'Registration successful! Please login to continue.'
-          }
+        toast.success('Registration successful! Redirecting to login...', {
+          position: "top-center",
+          autoClose: 2000,
+          hideProgressBar: false,
+          closeOnClick: true,
+          pauseOnHover: true,
+          draggable: true,
+          onClose: () => navigate('/login', { 
+            state: { 
+              message: 'Registration successful! Please login with your credentials.',
+              mobileNumber: formData.mobileNumber 
+            }
+          })
         });
       } else {
-        toast.error(response.message || 'OTP verification failed');
+        toast.error('Invalid OTP. Please try again.', {
+          position: "top-center",
+          autoClose: 4000,
+          hideProgressBar: false,
+          closeOnClick: true,
+          pauseOnHover: true,
+          draggable: true,
+        });
       }
     } catch (error) {
       console.error('OTP verification error:', error);
-      toast.error(error.message || 'OTP verification failed');
+      toast.error('OTP verification failed. Please try again.', {
+        position: "top-center",
+        autoClose: 4000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+      });
     } finally {
       setLoading(false);
     }
@@ -124,10 +197,24 @@ const Register = () => {
     try {
       setLoading(true);
       await resendOTP(otpData.userId);
-      toast.success('OTP resent successfully!');
+      toast.success('OTP resent successfully!', {
+        position: "top-center",
+        autoClose: 4000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+      });
     } catch (error) {
       console.error('Resend OTP error:', error);
-      toast.error(error.message || 'Failed to resend OTP');
+      toast.error('Failed to resend OTP', {
+        position: "top-center",
+        autoClose: 4000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+      });
     } finally {
       setLoading(false);
     }

@@ -145,76 +145,36 @@ export const AuthProvider = ({ children }) => {
       setLoading(true);
       setError(null);
       
-      // Format mobile number
-      const formattedNumber = formatMobileNumber(mobileNumber);
+      const formattedMobile = formatMobileNumber(mobileNumber);
       
-      // Validate mobile number format
-      if (!/^[6-9]\d{9}$/.test(formattedNumber)) {
-        throw new Error('Please enter a valid 10-digit Indian mobile number');
-      }
-
-      // Validate password
-      if (!password || password.length < 6) {
-        throw new Error('Password must be at least 6 characters long');
-      }
-
-      console.log('Attempting login with:', { mobileNumber: formattedNumber });
-
-      // Clear any existing token
-      localStorage.removeItem('token');
-      delete axios.defaults.headers.common['Authorization'];
-
-      // Make login request
       const response = await axios.post('/api/auth/login', {
-        mobileNumber: formattedNumber,
+        mobileNumber: formattedMobile,
         password
       });
 
-      console.log('Login response:', response.data);
-
-      // Handle successful login
-      if (response.data && response.data.success && response.data.token && response.data.user) {
+      if (response.data && response.data.success) {
         const { token: newToken, user: userData } = response.data;
-        
-        // Store token and update headers
         localStorage.setItem('token', newToken);
         setToken(newToken);
-        axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
-        
-        // Update user state
         setUser(userData);
-        
-        return {
-          success: true,
-          user: userData
-        };
+        return { success: true };
       } else {
-        console.error('Invalid response format:', response.data);
-        throw new Error('Invalid response from server');
+        throw new Error(response.data.message || 'Login failed');
       }
     } catch (error) {
-      // Clear any existing token on error
-      localStorage.removeItem('token');
-      delete axios.defaults.headers.common['Authorization'];
-      setToken(null);
-      setUser(null);
-
-      console.error('Login error:', error.response || error);
-
-      // Handle specific error cases
-      if (error.response?.status === 401) {
-        if (error.response.data?.message) {
-          throw new Error(error.response.data.message);
-        } else {
-          throw new Error('Invalid mobile number or password');
-        }
-      } else if (error.response?.data?.message) {
-        throw new Error(error.response.data.message);
-      } else if (error.message) {
-        throw new Error(error.message);
+      console.error('Login error:', error);
+      let errorMessage;
+      
+      if (error.response && error.response.data) {
+        errorMessage = error.response.data.message;
+      } else if (error.request) {
+        errorMessage = 'Network error. Please check your internet connection.';
       } else {
-        throw new Error('Login failed. Please try again.');
+        errorMessage = error.message || 'An unexpected error occurred';
       }
+      
+      setError(errorMessage);
+      throw new Error(errorMessage);
     } finally {
       setLoading(false);
     }

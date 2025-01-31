@@ -15,14 +15,21 @@ const Login = () => {
     password: ''
   });
 
-  // Show message from password reset if present
   useEffect(() => {
     if (location.state?.message) {
-      toast.success(location.state.message);
+      toast.success(location.state.message, {
+        position: "top-center",
+        autoClose: 3000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+        theme: "colored"
+      });
       // Clear the message from location state
-      window.history.replaceState({}, document.title);
+      navigate(location.pathname, { replace: true });
     }
-  }, [location.state]);
+  }, [location.state, navigate, location.pathname]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -38,23 +45,97 @@ const Login = () => {
     // Validate mobile number
     const mobileRegex = /^[0-9]{10}$/;
     if (!mobileRegex.test(formData.mobileNumber)) {
-      toast.error('Please enter a valid 10-digit mobile number');
+      toast.error('Please enter a valid 10-digit mobile number', {
+        position: "top-center",
+        autoClose: 4000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+        theme: "colored"
+      });
       return;
     }
 
+    // Validate password
+    if (!formData.password || formData.password.length < 6) {
+      toast.error('Password must be at least 6 characters long', {
+        position: "top-center",
+        autoClose: 4000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+        theme: "colored"
+      });
+      return;
+    }
+
+    let toastId = null;
+
     try {
       setLoading(true);
+      
+      // Show loading toast
+      toastId = toast.loading('Logging in...', {
+        position: "top-center",
+        theme: "colored"
+      });
+      
       // Format mobile number for consistency
       const formattedMobile = formData.mobileNumber.startsWith('91') 
         ? formData.mobileNumber 
         : formData.mobileNumber.replace(/^(\+91|91)?/, '');
 
       await login(formattedMobile, formData.password);
-      toast.success('Login successful!');
-      navigate('/profile');
+      
+      // Dismiss loading toast
+      if (toastId) {
+        toast.dismiss(toastId);
+      }
+
+      // Show success message
+      toast.success('Login successful! Redirecting...', {
+        position: "top-center",
+        autoClose: 1500,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+        theme: "colored"
+      });
+
+      // Wait for toast to be visible before redirecting
+      setTimeout(() => {
+        const redirectPath = localStorage.getItem('redirectPath') || '/profile';
+        localStorage.removeItem('redirectPath');
+        navigate(redirectPath, { replace: true });
+      }, 2000);
+      
     } catch (error) {
       console.error('Login error:', error);
-      toast.error(error.message || 'Failed to login. Please try again.');
+      
+      // Dismiss loading toast if it exists
+      if (toastId) {
+        toast.dismiss(toastId);
+      }
+      
+      // Show error toast
+      toast.error(error.message, {
+        position: "top-center",
+        autoClose: 5000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+        theme: "colored"
+      });
+      
+      // Clear password field on error
+      setFormData(prev => ({
+        ...prev,
+        password: ''
+      }));
     } finally {
       setLoading(false);
     }

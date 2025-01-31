@@ -1,6 +1,8 @@
 import React, { Suspense } from 'react';
 import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 import Header from './components/Header';
 import Footer from './components/Footer';
 import Home from './components/Home';
@@ -28,6 +30,7 @@ import BloodRequest from './components/bookings/BloodRequest';
 import Bookings from './components/bookings/Bookings';
 import BloodDonation from './components/services/BloodDonation';
 import BlogPost from './components/BlogPost';
+import ToastTest from './components/ToastTest';
 
 import './styles/global.css';
 import 'leaflet/dist/leaflet.css';
@@ -43,6 +46,19 @@ const App = () => {
     <Router>
       <ThemeProvider>
         <AuthProvider>
+          <ToastContainer
+            position="top-center"
+            autoClose={5000}
+            hideProgressBar={false}
+            newestOnTop={true}
+            closeOnClick
+            rtl={false}
+            pauseOnFocusLoss
+            draggable
+            pauseOnHover
+            theme="colored"
+            limit={3}
+          />
           <div className="min-h-screen">
             <Sidebar />
             <div className="transition-all duration-300 ml-64 md:ml-64">
@@ -90,6 +106,9 @@ const App = () => {
 
                     {/* Blood Service Routes */}
                     <Route path="/blood-services/donate" element={<PrivateRoute><BloodDonation /></PrivateRoute>} />
+
+                    {/* Test Route */}
+                    <Route path="/test-toast" element={<ToastTest />} />
 
                     {/* Protected Routes */}
                     <Route
